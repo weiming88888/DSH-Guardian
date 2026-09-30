@@ -163,6 +163,14 @@ switch ($Action) {
     }
 
     'Create' {
+        # Validate before writing anything. Without this the directory was made
+        # first and the run then died reading package.json, leaving an empty
+        # orphan snapshot behind that shows up in -Action List and looks like a
+        # usable baseline although it holds no files at all.
+        if (-not (Test-Path -LiteralPath (Join-Path $ProfileDir 'package.json'))) {
+            throw ("No package.json in {0} - there is nothing to snapshot. Is this really a DSH profile?" -f $ProfileDir)
+        }
+
         $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
         $safeLabel = if ($Label) { $Label } else { 'none' }
         $name = if ($Label) { "snap-$stamp-$Label" } else { "snap-$stamp" }
@@ -273,6 +281,15 @@ switch ($Action) {
 
         $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
         $preDir = Join-Path $SnapshotRoot "pre-restore-$stamp"
+        # Same reasoning as the snapshot names above: the stamp has one-second
+        # resolution, so a second restore inside the same second would have
+        # reused this directory and overwritten the first backup -- destroying
+        # the only copy of the configuration that restore was meant to preserve.
+        if ((Test-Path -LiteralPath $preDir) -and -not $DryRun) {
+            $n = 2
+            while (Test-Path -LiteralPath (Join-Path $SnapshotRoot ('pre-restore-{0}-{1}' -f $stamp, $n))) { $n++ }
+            $preDir = Join-Path $SnapshotRoot ('pre-restore-{0}-{1}' -f $stamp, $n)
+        }
 
         Write-Host ("Restore source: {0}" -f $snap.Name)
         Write-Host ("Current state will be saved to: {0}" -f $preDir)
