@@ -7,6 +7,8 @@ DSH Guardian watches for exactly that: when a newly installed plugin makes DSH
 fail to boot, it restores the last known-good configuration, reconciles the
 dependencies and relaunches DSH.
 
+> English · [中文](README.zh-CN.md) · [详细中文说明](docs/GUIDE-zh.md) · [Technical reference](docs/TECHNICAL.md)
+
 ```
    DSH Guardian  ·  DSH 崩溃自动回退
 ==========================================================
