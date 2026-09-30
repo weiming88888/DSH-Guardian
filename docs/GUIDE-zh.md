@@ -1,8 +1,12 @@
 # 崩溃回退 · 使用说明
 
-给 DeepSeek Harness（DSH）用的**崩溃自动回退**工具。
+给 DeepSeek Harness（DSH）**桌面版**（Windows 上安装的那个应用）用的**崩溃自动回退**工具。
 
 装了插件后如果 DSH 起不来，它会把配置退回上一个能用的版本、把依赖重新装好、再重启 DSH。
+
+> **适用对象**：DSH 桌面版的 `desktop` profile（`%USERPROFILE%\.dsh\profiles\desktop`）。
+> **仅 Windows**。不是通用 DSH 工具——依赖对齐那一步用的是桌面版自带的 pnpm，
+> 因为 DSH 命令行会拒绝操作桌面版管理的 profile。详见 [README.zh-CN.md](../README.zh-CN.md)。
 
 > 本文件是**完整细节版**。想先看精简的项目介绍，请回 [README.zh-CN.md](../README.zh-CN.md)。
 
