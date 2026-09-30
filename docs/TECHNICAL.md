@@ -159,7 +159,7 @@ dsh-guardian.exe rollback   roll back now (asks first)
 dsh-guardian.exe preview    show the rollback plan, writes nothing
 dsh-guardian.exe arm        start watching (runs with this window)
 dsh-guardian.exe disarm     stop watching
-dsh-guardian.exe shortcut   recreate the desktop shortcut
+dsh-guardian.exe shortcut   create the desktop shortcut (manual only)
 ```
 
 `dsh-snapshot.ps1` also accepts `-Action Create|List|Verify|Restore|Mark-Good`.
