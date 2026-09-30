@@ -4,6 +4,8 @@
 
 装了插件后如果 DSH 起不来，它会把配置退回上一个能用的版本、把依赖重新装好、再重启 DSH。
 
+> 本文件是**完整细节版**。想先看精简的项目介绍，请回 [README.zh-CN.md](../README.zh-CN.md)。
+
 ---
 
 ## 最重要的一点
@@ -23,7 +25,7 @@
 
 双击桌面上的 **「DSH Guardian」**。
 
-> 图标不见了？进 `D:\DS\崩溃回退\程序`，双击 `dsh-guardian.exe`，图标会自动建回来。
+> 图标不见了？进 `app`，双击 `dsh-guardian.exe`，图标会自动建回来。
 
 ---
 
@@ -370,7 +372,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "app\dsh-watchdog.ps1" -NoSt
 不想用菜单时：
 
 ```powershell
-cd "D:\DS\崩溃回退\程序"
+cd "app"
 
 .\dsh-guardian.exe logs        # 看错误日志
 .\dsh-guardian.exe baseline    # 打基线
@@ -447,7 +449,7 @@ D:\DS\崩溃回退\data\诊断报告\诊断报告-日期-时间.txt
 也可以按 `Ctrl+Shift+Esc` 打开任务管理器，看有没有相关 powershell 进程。
 
 **问：桌面图标不见了？**
-答：进 `D:\DS\崩溃回退\程序` 双击 `dsh-guardian.exe`，图标会自动建回来。
+答：进 `app` 双击 `dsh-guardian.exe`，图标会自动建回来。
 
 **问：回退后还要手动做什么？**
 答：不用。依赖对齐已自动完成。只有日志里出现 `ACTION NEEDED` 才需要动手。
