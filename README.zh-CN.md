@@ -4,7 +4,7 @@
 
 装插件把 DSH 搞崩了？它会自动把配置退回上一个能用的版本、把依赖重新装好、再把 DSH 拉起来。
 
-> [English](README.md) · 中文
+> [English](README.md) · 中文 · [完整使用说明](docs/GUIDE-zh.md) · [技术文档](docs/TECHNICAL.md)
 
 ---
 
@@ -139,16 +139,54 @@ https://github.com/weiming88888/DSH-Guardian/archive/refs/heads/main.zip
 
 **手动回退永远可逆**：写盘之前，当前配置会先另存到 `data\snapshots\pre-restore-时间\`，随时能切回来。
 
+### 名字后面的 `-2` 是什么
+
+快照名精确到秒（如 `snap-20260930-134944-known-good`）。如果你在**同一秒内**又打了一次基线，
+第二份会自动变成 `snap-20260930-134944-known-good-2`。
+
+这是**故意的**：绝不覆盖已存在的快照。`pre-restore-` 备份同理。
+正常使用（间隔超过 1 秒）不会出现后缀。
+
+## 崩溃了会怎样
+
+前提：窗口开着，自动检查是"开"。
+
+1. 端口探测失败 → 重启 DSH
+2. 一直失败 → 判定为**启动崩溃循环**。判定依据是**两个独立信号之一**：
+   - `-CrashLoopThreshold` 次启动（默认 3）都在 `-StartGraceSeconds`（默认 45 秒）内死掉，**或**
+   - 重启预算 `-BootRetryBudget`（默认 3）用尽而 DSH 始终不响应
+3. 抓取崩溃证据：每次启动的 stdout+stderr，存在 `data\console\`
+4. 你那套坏配置**另存**到 `data\snapshots\pre-restore-<时间>\`
+5. 恢复上一个好版本
+6. 对齐 `node_modules`
+7. 重启 DSH
+
 ## 安全闸门
 
 防止它把事情弄得更糟：
 
 | 闸门 | 效果 |
 |---|---|
-| 还没打过基线 | 拒绝回退，并在日志里写明原因 |
+| 还没打过基线 | 拒绝回退，并在日志里写明原因（不瞎猜） |
 | 这套配置已经回退过 | **同样的配置绝不回退第二次** |
 | 回退也没救回来 | **停止重启**并明确告知（因为重启更没用） |
 | 单次崩溃最多自动回退 2 次 | 硬上限，不可能陷入循环 |
+
+所有提示都按签名去重——监视器跑几小时也不会把日志刷满同一句话。
+
+## 默认参数（都有对应的命令行开关）
+
+| 参数 | 默认值 | 含义 |
+|---|---|---|
+| `-Port` | **19387** | 探测端口（DSH 自身默认是 3080） |
+| `-ProbeTimeoutMs` | 3000 | TCP 探测超时 |
+| `-StartGraceSeconds` | 45 | 启动后多久算"活下来" |
+| `-BootWindowSeconds` | 90 | 允许 DSH 绑定端口的时间 |
+| `-BootRetryBudget` | 3 | 一次崩溃里最多重启几次 |
+| `-CrashLoopThreshold` | 3 | 连续短命启动几次算崩溃循环 |
+| `-MaxAutoRollbacks` | 2 | 单次崩溃最多自动回退几次 |
+| `-IntervalSeconds` | 55 | 监视间隔（仅常驻模式） |
+| `-MaxResidentMinutes` | 240 | 常驻监视最长存活时间 |
 
 ## 命令行用法（可选）
 
@@ -164,6 +202,9 @@ cd app
 .\dsh-guardian.exe shortcut    # 重建桌面快捷方式
 ```
 
+`dsh-snapshot.ps1` 还支持 `-Action Create | List | Verify | Restore | Mark-Good | Promote`，
+以及 `-DryRun`、`-Force`。**不加 `-Force` 的 `Restore` 只打印计划，不写盘。**
+
 ## 出问题了怎么反馈
 
 双击桌面的 **「DSH Guardian 诊断」**，它会：
@@ -178,7 +219,11 @@ cd app
 
 - **端口写死为 19387。** DSH 自己的默认端口是 3080。**端口不一致会让它误判成崩溃并反复重启**，打开自动检查前请先确认。
 - **监视只在窗口开着时有效。** 这是"平时不运行"的必然代价，两者不可兼得。
+- **探测方式是 TCP 连接**（默认 3 秒超时），不是 HTTP 请求。所以它只能判断"端口是否响应"，**看不出进程内部的偶发错误**。
 - 只动这 6 个配置文件：`package.json`、`pnpm-lock.yaml`、`cordis.patch.yml`、`cordis.yml`、`pnpm-workspace.yaml`、`compatibility.json`。**不碰**你的会话记录和凭据，也不删 `node_modules`（只按恢复后的版本重新对齐）。
+- `dsh plugin --profile <名字> install` 会被 DSH CLI 拒绝（该 profile 由 Electron 应用独占管理），所以对齐依赖时直接调用应用自带的 pnpm：
+  `resources\runtime\pnpm\dist\pnpm.mjs` + 运行时自带的 `node.exe`，在 profile 目录里执行 `install --no-frozen-lockfile`。
+- 常驻监视有存活上限（`-MaxResidentMinutes`，默认 240 分钟），忘记关窗口也不会永久占用。
 
 ## 环境要求
 
@@ -206,6 +251,9 @@ docs\
 data\                             运行时数据（不在仓库里）
   mode.json / state.json / last-tick.json / last-known-good.json
   watchdog.log / events.jsonl / exe-trace.log
+  child-stderr.log                  子脚本报错（自动回退时排查用）
+  menu-error.log                    菜单出错记录
+  console\                          每次启动 DSH 捕获的 stdout+stderr
   snapshots\                        各版本快照
   诊断报告\                         诊断报告
 ```
