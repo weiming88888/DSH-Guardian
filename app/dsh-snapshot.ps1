@@ -167,6 +167,19 @@ switch ($Action) {
         $safeLabel = if ($Label) { $Label } else { 'none' }
         $name = if ($Label) { "snap-$stamp-$Label" } else { "snap-$stamp" }
         $dest = Join-Path $SnapshotRoot $name
+
+        # The stamp has one-second resolution, so two baselines taken inside the
+        # same second produced the same name and the second silently overwrote
+        # the first: two different configurations collapsed into one snapshot and
+        # the overwritten one became impossible to roll back to. Snapshots exist
+        # to be KEPT, so disambiguate instead of clobbering.
+        if ((Test-Path -LiteralPath $dest) -and -not $DryRun) {
+            $n = 2
+            while (Test-Path -LiteralPath (Join-Path $SnapshotRoot ('{0}-{1}' -f $name, $n))) { $n++ }
+            $name = '{0}-{1}' -f $name, $n
+            $dest = Join-Path $SnapshotRoot $name
+        }
+
         $files = Get-ExistingConfigFiles
 
         Write-Host "Snapshot to create: $dest"
