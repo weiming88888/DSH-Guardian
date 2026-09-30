@@ -611,12 +611,13 @@ function Invoke-AutoRollback {
             & $snapshotScript -Action Restore -Force -Snapshot $Pointer.snapshot -SnapshotRoot $Pointer.snapshotRoot -ProfileName $ProfileName -DshHome $DshHome *>&1 |
                 ForEach-Object { Write-Log ("  restore: {0}" -f $_) }
             $restored = @($ConfigPlane | Where-Object { Test-Path -LiteralPath (Join-Path $ProfileDir $_) })
-            # The script names that backup from its own clock reading, so check
-            # both its stamp and ours before giving up on reporting it.
-            foreach ($cand in @($preStamp, (Get-Date -Format 'yyyyMMdd-HHmmss'))) {
-                $p = Join-Path $Pointer.snapshotRoot "pre-restore-$cand"
-                if (Test-Path -LiteralPath $p) { $preDir = $p; break }
-            }
+            # Report the backup the script actually made. Look it up by name
+            # rather than re-deriving the stamp: the script may have appended a
+            # disambiguating suffix, and in a same-second rollback its clock
+            # reading can differ from ours.
+            $newestPre = Get-ChildItem -LiteralPath $Pointer.snapshotRoot -Directory -Filter 'pre-restore-*' -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($newestPre) { $preDir = $newestPre.FullName }
         } catch {
             $err = $_.Exception.Message
         }
