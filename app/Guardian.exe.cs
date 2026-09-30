@@ -129,7 +129,14 @@ internal static class Guardian
             return 2;
         }
 
-        try { EnsureShortcut(); } catch { }
+        // Deliberately NO shortcut handling on startup.
+        //
+        // This program used to create a desktop shortcut on every launch and,
+        // later, to "repair" one it found. Both are unrequested changes to the
+        // user's desktop: merely running the exe - including a copy extracted
+        // from a release archive just to look at it - could add or redirect a
+        // shortcut. A shortcut is now created only when explicitly requested
+        // with the 'shortcut' command.
 
         // args is null, not empty, when the process is started with no
         // command line at all (Explorer double-click, some shims).
@@ -213,7 +220,7 @@ internal static class Guardian
         Say("  dsh-guardian.exe preview     show the rollback plan, writes nothing");
         Say("  dsh-guardian.exe arm         start watching (runs with this window)");
         Say("  dsh-guardian.exe disarm      stop watching");
-        Say("  dsh-guardian.exe shortcut    recreate the desktop shortcut");
+        Say("  dsh-guardian.exe shortcut    create the desktop shortcut (manual only)");
         Say("");
         Say("Nothing runs in the background: the watcher is started from the menu");
         Say("and stops when this window closes. There is no scheduled task.");
@@ -950,50 +957,17 @@ internal static class Guardian
     }
 
     // ------------------------------------------------------------- shortcut
-    // The rule, in the user's words: if a shortcut exists, do not add another one.
+    // Shortcuts are ONLY touched on an explicit request.
     //
-    // Desktop shortcuts can live in two places - the user's Desktop folder and
-    // the shared Public Desktop - and either one is started by Windows. Earlier
-    // versions looked at only the first of them, so a shortcut in the other was
-    // invisible to this code and every run added one more to the folder it did
-    // look at. Duplicates are also possible after upgrading, or after a second
-    // copy of the exe has been run.
+    // Nothing here runs at startup. Earlier versions created a desktop shortcut
+    // on every launch and then "repaired" whatever they found, which meant that
+    // merely running the exe - including a copy extracted from a release archive
+    // just to inspect it - could add or redirect a shortcut on the user's
+    // desktop without being asked. That is gone: 'dsh-guardian.exe shortcut' is
+    // the only way a shortcut is ever created or changed.
     //
-    // So: scan both folders, drop every shortcut that duplicates one already
-    // present while agreeing on a target, then make sure exactly one valid
-    // shortcut exists.
-    private static void EnsureShortcut()
-    {
-        List<string> found = ExistingShortcuts();
-
-        // Prefer the user's own Desktop as the one to keep; fall back to the
-        // shared one. Removing from the end first keeps the survivor stable.
-        string keep = null;
-        foreach (string p in found)
-        {
-            if (IsUserDesktop(p)) { keep = p; break; }
-        }
-        if (keep == null && found.Count > 0) keep = found[0];
-
-        foreach (string p in found)
-        {
-            if (p == keep) continue;
-            // Same exe already covered by the kept shortcut: this is a duplicate.
-            if (keep != null && ShortcutTargets(p)) { try { File.Delete(p); } catch { } }
-        }
-
-        if (keep != null)
-        {
-            // Repair rather than duplicate: a shortcut that exists but points at
-            // a deleted copy would otherwise be recreated non-stop.
-            if (ShortcutTargets(keep)) return;
-            WriteShortcut(keep);
-            return;
-        }
-
-        // Nothing pointing at us yet: create one, preferring the user's Desktop.
-        CreateShortcutIfAbsent();
-    }
+    // When it IS asked for: write the user's own Desktop shortcut and clear
+    // copies from the shared Public Desktop, so no duplicate is left behind.
 
     // Every "DSH Guardian.lnk" in either Desktop folder.
     private static List<string> ExistingShortcuts()
@@ -1040,52 +1014,12 @@ internal static class Guardian
         catch { return false; }
     }
 
-    // True when the shortcut points at this very executable. Any failure while
-    // reading it counts as "not correct".
-    private static bool ShortcutTargets(string lnk)
-    {
-        try
-        {
-            object shortcut = OpenShortcut(lnk);
-            if (shortcut == null) return false;
-            object target = shortcut.GetType().InvokeMember("TargetPath", BindingFlags.GetProperty, null, shortcut, null);
-            string want = Assembly.GetExecutingAssembly().Location;
-            string have = target as string;
-            return !string.IsNullOrEmpty(have)
-                && string.Equals(have, want, StringComparison.OrdinalIgnoreCase);
-        }
-        catch { return false; }
-    }
-
     private static object OpenShortcut(string lnk)
     {
         Type t = Type.GetTypeFromProgID("WScript.Shell");
         if (t == null) return null;
         object shell = Activator.CreateInstance(t);
         return t.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { lnk });
-    }
-
-    // Creates the shortcut on the user's Desktop unless one is already there,
-    // and on the shared Desktop if the user's own is not writable.
-    private static bool CreateShortcutIfAbsent()
-    {
-        string user = null, common = null;
-        try { user = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory); } catch { }
-        try { common = Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory); } catch { }
-
-        foreach (string dir in new string[] { user, common })
-        {
-            if (string.IsNullOrEmpty(dir)) continue;
-            try
-            {
-                if (!Directory.Exists(dir)) continue;
-                string lnk = Path.Combine(dir, ShortcutName + ".lnk");
-                WriteShortcut(lnk);
-                return true;
-            }
-            catch { }
-        }
-        return false;
     }
 
     private static void WriteShortcut(string lnk)
@@ -1108,17 +1042,15 @@ internal static class Guardian
     // user's Desktop shortcut and remove duplicates elsewhere.
     private static void ForceShortcut()
     {
+        // Clear copies from the shared Public Desktop first, then write the
+        // user's own shortcut. One pass is enough: WriteShortcut does not add
+        // anything to the shared folder.
         foreach (string p in ExistingShortcuts())
         {
             if (!IsUserDesktop(p)) { try { File.Delete(p); } catch { } }
         }
         string user = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
         WriteShortcut(Path.Combine(user, ShortcutName + ".lnk"));
-        // Keep only what we just wrote.
-        foreach (string p in ExistingShortcuts())
-        {
-            if (!IsUserDesktop(p)) { try { File.Delete(p); } catch { } }
-        }
     }
 
     private static string WriteIcon()
