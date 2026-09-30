@@ -18,3 +18,6 @@ _bench.cs
 _t.cs
 *.tmp
 *.bak
+
+# Release archives built locally.
+*.zip
