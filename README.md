@@ -38,8 +38,9 @@ opened. Close the window and the tool is genuinely gone.
 ## Install
 
 1. **Download the packaged ZIP** (ready to run: exe, sources and docs) from
-   **[Releases](https://github.com/weiming88888/DSH-Guardian/releases/latest)**,
-   and extract it somewhere permanent, e.g. `D:\DS\崩溃回退`.
+   **[Releases](https://github.com/weiming88888/DSH-Guardian/releases/latest)**.
+   It extracts to a single `DSH-Guardian-<version>\` folder - put that folder
+   somewhere permanent, e.g. `D:\DS\`.
 2. Double-click `app\dsh-guardian.exe`. A Chinese menu opens in a console
    window and a desktop shortcut is created automatically.
 3. Press `3` once to record the current working state as your first baseline.
