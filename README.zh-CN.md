@@ -78,8 +78,8 @@ https://github.com/weiming88888/DSH-Guardian/archive/refs/heads/main.zip
 双击 `app\dsh-guardian.exe`。
 
 - 会弹出一个中文菜单窗口
-- **会自动在桌面创建快捷方式**
-- 没有安装程序，不写注册表
+- **没有安装程序、不写注册表、也不会动你的桌面**
+- **快捷方式不会被自动创建**。想要的话，执行一次 `dsh-guardian.exe shortcut`
 
 ### 3. 打第一个基线
 
@@ -199,7 +199,7 @@ cd app
 .\dsh-guardian.exe preview     # 只显示回退计划，什么都不改
 .\dsh-guardian.exe arm         # 开始监视（随当前窗口，关窗即停）
 .\dsh-guardian.exe disarm      # 停止监视
-.\dsh-guardian.exe shortcut    # 重建桌面快捷方式
+.\dsh-guardian.exe shortcut    # 创建桌面快捷方式（仅手动，不会自动创建）
 ```
 
 `dsh-snapshot.ps1` 还支持 `-Action Create | List | Verify | Restore | Mark-Good | Promote`，
