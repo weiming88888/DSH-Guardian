@@ -297,10 +297,18 @@ function Get-ConfigFingerprint {
     $items = @()
     foreach ($n in $ConfigPlane) {
         $p = Join-Path $ProfileDir $n
-        if (Test-Path -LiteralPath $p) {
-            $f = Get-Item -LiteralPath $p
-            $items += [ordered]@{ file = $n; bytes = $f.Length; mtime = $f.LastWriteTime.ToString('o') }
-        } else {
+        # Reading length/mtime can still fail after Test-Path passed: the file can
+        # be replaced in between, or be locked by the installer while it writes.
+        # $ErrorActionPreference is 'Stop', so an unguarded throw here would kill
+        # the whole round -- the watcher would silently stop watching.
+        try {
+            if (Test-Path -LiteralPath $p) {
+                $f = Get-Item -LiteralPath $p -ErrorAction Stop
+                $items += [ordered]@{ file = $n; bytes = $f.Length; mtime = $f.LastWriteTime.ToString('o') }
+            } else {
+                $items += [ordered]@{ file = $n; bytes = $null; mtime = $null }
+            }
+        } catch {
             $items += [ordered]@{ file = $n; bytes = $null; mtime = $null }
         }
     }
@@ -598,6 +606,15 @@ function Invoke-AutoRollback {
     # left TWO identical pre-restore directories for the same broken config.
     $preStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $preDir = $null
+    # Which backups already exist, so the one THIS rollback creates can be
+    # identified exactly. Picking "the newest" would be wrong when a manual
+    # restore runs close by, or on a clock adjustment: it could report - and
+    # later log - a backup belonging to a different operation.
+    $preBefore = @()
+    try {
+        $preBefore = @(Get-ChildItem -LiteralPath $Pointer.snapshotRoot -Directory -Filter 'pre-restore-*' -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.Name })
+    } catch { }
 
     $restored = @()
     $deleted = @()
@@ -611,13 +628,14 @@ function Invoke-AutoRollback {
             & $snapshotScript -Action Restore -Force -Snapshot $Pointer.snapshot -SnapshotRoot $Pointer.snapshotRoot -ProfileName $ProfileName -DshHome $DshHome *>&1 |
                 ForEach-Object { Write-Log ("  restore: {0}" -f $_) }
             $restored = @($ConfigPlane | Where-Object { Test-Path -LiteralPath (Join-Path $ProfileDir $_) })
-            # Report the backup the script actually made. Look it up by name
-            # rather than re-deriving the stamp: the script may have appended a
-            # disambiguating suffix, and in a same-second rollback its clock
-            # reading can differ from ours.
-            $newestPre = Get-ChildItem -LiteralPath $Pointer.snapshotRoot -Directory -Filter 'pre-restore-*' -ErrorAction SilentlyContinue |
-                Sort-Object LastWriteTime -Descending | Select-Object -First 1
-            if ($newestPre) { $preDir = $newestPre.FullName }
+            # The backup this rollback just made is the one that was not there
+            # before. Fall back to the newest only if that difference is empty,
+            # which would mean the script did not create one at all.
+            $preAfter = @(Get-ChildItem -LiteralPath $Pointer.snapshotRoot -Directory -Filter 'pre-restore-*' -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending)
+            $mine = @($preAfter | Where-Object { $preBefore -notcontains $_.Name })
+            if ($mine.Count -gt 0) { $preDir = $mine[0].FullName }
+            elseif ($preAfter.Count -gt 0) { $preDir = $preAfter[0].FullName }
         } catch {
             $err = $_.Exception.Message
         }
@@ -791,14 +809,24 @@ if ($AutoRollback -and $rollbackCount -ge $MaxAutoRollbacks -and (Get-Prop $stat
     Write-Log ("Auto-rollback suppressed: already rolled back {0} time(s) in this episode (cap {1}). Human review required." -f $rollbackCount, $MaxAutoRollbacks) 'WARN'
 }
 
-if ($state.configFingerprint -and $state.configFingerprint -ne $fpJson) {
+if (-not $state.configFingerprint) {
+    # First observation (or a state file written before this field existed).
+    # Record it without reporting a change: there is nothing to compare against,
+    # and announcing "a plugin was installed" on the very first round would be
+    # wrong.
+    #
+    # This assignment must stay OUTSIDE the comparison below. When it lived
+    # inside it, a null fingerprint made the condition false, so the value was
+    # never stored and the comparison stayed false forever -- the "a plugin was
+    # installed" notice was permanently dead, and so was the input to the
+    # never-roll-back-the-same-configuration guard.
+    $state.configFingerprint = $fpJson
+    Write-Log 'Config plane fingerprint recorded (first observation)' 'INFO'
+} elseif ($state.configFingerprint -ne $fpJson) {
     Write-Event -Kind 'CONFIG-CHANGED' -Fields @{ previous = $state.configFingerprint; current = $fpJson }
     Write-Log 'Config plane changed (a plugin was most likely installed or removed)' 'INFO'
     $snapScript = Join-Path $PSScriptRoot 'dsh-snapshot.ps1'
     Write-Log ('  take a snapshot once health is confirmed: powershell -File "{0}" -Action Create' -f $snapScript) 'INFO'
-    # Only advance the stored fingerprint when it actually differs. Assigning it
-    # unconditionally every round made this comparison permanently false, so the
-    # "a plugin was installed" notice could never be printed a second time.
     $state.configFingerprint = $fpJson
 }
 
@@ -934,7 +962,11 @@ if ($alive) {
                 Write-Event -Kind 'ROLLBACK-IMPOSSIBLE' -Fields @{ reason = 'no known-good snapshot pointer'; pointerFile = $pointerFile }
             } else {
                 # Crash diagnostics first: the restore may replace config files.
-                $rescue = Invoke-AutoRollback -Pointer $pointer -State $state -Reason 'startup crash loop'
+                # The return value is deliberately not captured: the function
+                # already logs every field, appends a ROLLBACK event and writes
+                # the rescue record file itself, so a caller-side copy was a
+                # write-only variable.
+                Invoke-AutoRollback -Pointer $pointer -State $state -Reason 'startup crash loop' | Out-Null
                 $state.autoRollbacks = [int]$rollbackCount + 1
                 $state.lastAutoRollbackAt = (Get-Date).ToString('o')
                 # The restored plane becomes the new baseline.
@@ -1018,9 +1050,13 @@ if (-not $state.lastHeartbeatLog -or
 }
 
 if (Test-Path -LiteralPath $reportLog) {
-    if ((Get-Item -LiteralPath $reportLog).Length -gt 5MB) {
-        Move-Item -LiteralPath $reportLog -Destination "$reportLog.1" -Force
-    }
+    # Guarded for the same reason as the fingerprint: the file can disappear
+    # between the Test-Path and the read, and a throw here would end the round.
+    try {
+        if ((Get-Item -LiteralPath $reportLog -ErrorAction Stop).Length -gt 5MB) {
+            Move-Item -LiteralPath $reportLog -Destination "$reportLog.1" -Force -ErrorAction Stop
+        }
+    } catch { }
 }
 
     if (-not $residentWanted) { break }
