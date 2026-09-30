@@ -1,0 +1,20 @@
+# Runtime data - never published.
+#
+# This directory holds state produced by running the tool: the mode flag, the
+# rollback pointer, logs, crash evidence, snapshots of your own DSH profile and
+# generated diagnostic reports. It contains your local paths and the list of
+# plugins you have installed, so it must not be committed.
+data/
+
+# Snapshots and reports, in case a different data directory is used.
+snapshots/
+诊断报告/
+*.log
+
+# Build output and scratch files.
+_probe.*
+_pick*.cs
+_bench.cs
+_t.cs
+*.tmp
+*.bak
