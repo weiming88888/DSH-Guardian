@@ -1,10 +1,39 @@
 # DSH Guardian
 
-**给 DeepSeek Harness（DSH）用的崩溃自动回退工具。**
+**给 DeepSeek Harness（DSH）*桌面版*用的崩溃自动回退工具。**
 
 装插件把 DSH 搞崩了？它会自动把配置退回上一个能用的版本、把依赖重新装好、再把 DSH 拉起来。
 
 > [English](README.md) · 中文 · [完整使用说明](docs/GUIDE-zh.md) · [技术文档](docs/TECHNICAL.md)
+
+---
+
+## 给 DSH **桌面版**用的
+
+**本工具面向 DeepSeek Harness 的*桌面版*（Windows 上安装的那个 Electron 应用），针对 `desktop` 这个 profile。**
+
+它**不是**通用 DSH 工具，当通用工具用会不工作：
+
+| | |
+|---|---|
+| 适用对象 | `desktop` profile，位于 `%USERPROFILE%\.dsh\profiles\desktop` |
+| 适用平台 | **仅 Windows**（用到 `AllocConsole`、`MessageBoxW`、`WScript.Shell`） |
+| 还需要 | Windows PowerShell 5.1（系统自带） |
+| **不适用** | DSH 命令行安装，或任何不由桌面版管理的 profile |
+
+之所以是桌面版专用，关键在**依赖对齐**这一步。DSH 命令行**拒绝**碰桌面版管理的 profile：
+
+```
+dsh plugin --profile desktop install   ->  被拒绝（"由 Electron 应用独占管理"）
+```
+
+所以 DSH Guardian 不走命令行，而是调用**桌面版自带的 pnpm**
+（`resources\runtime\pnpm\dist\pnpm.mjs`，配合运行时自带的 `node.exe`），在 profile 目录里执行。
+这个路径只存在于桌面版安装目录里——这正是本工具围绕它构建的原因。
+
+如果你用的是别的 DSH 布局，它保护的那套配置
+（`package.json`、`pnpm-lock.yaml`、`cordis.patch.yml`、`cordis.yml`、
+`pnpm-workspace.yaml`、`compatibility.json`）思路仍然适用，但**依赖对齐那一步需要换成你自己的命令**。
 
 ---
 
@@ -227,9 +256,10 @@ cd app
 
 ## 环境要求
 
+- **已安装 DeepSeek Harness 桌面版**（Windows 上那个应用），并有 `desktop` profile
+  ——**不是**只有命令行的安装
 - Windows（用到 `AllocConsole`、`MessageBoxW`、`WScript.Shell`）
 - Windows PowerShell 5.1（系统自带）
-- 已安装 DeepSeek Harness
 
 ## 文件结构
 
