@@ -81,12 +81,14 @@ for it.
    **[Releases](https://github.com/weiming88888/DSH-Guardian/releases/latest)**.
    It extracts to a single `DSH-Guardian-<version>\` folder - put that folder
    somewhere permanent, e.g. `D:\DS\`.
-2. Double-click `app\dsh-guardian.exe`. A Chinese menu opens in a console window
-   and a desktop shortcut is created automatically.
+2. Double-click `app\dsh-guardian.exe`. A Chinese menu opens in a console
+   window.
 3. Press `3` once to record the current working state as your first baseline.
 
-There is no installer and no registry write. Delete the folder and the tool is
-gone completely.
+There is no installer, no registry write and **no shortcut is created for you** -
+the program never touches your desktop on its own. If you want one, run
+`dsh-guardian.exe shortcut` once. Delete the folder and the tool is gone
+completely.
 
 ## Use
 
@@ -187,7 +189,7 @@ dsh-guardian.exe rollback   pick a version, then roll back or set the target
 dsh-guardian.exe preview    show the rollback plan, writes nothing
 dsh-guardian.exe arm        start watching (runs with this window)
 dsh-guardian.exe disarm     stop watching
-dsh-guardian.exe shortcut   recreate the desktop shortcut
+dsh-guardian.exe shortcut   create the desktop shortcut (manual only)
 ```
 
 `dsh-snapshot.ps1` additionally accepts
