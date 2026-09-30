@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -191,7 +192,7 @@ internal static class Guardian
             case "on": return Arm(true);
             case "disarm":
             case "off": return Arm(false);
-            case "shortcut": CreateShortcut(true); return 0;
+            case "shortcut": ForceShortcut(); return 0;
             case "help":
             case "?": PrintHelp(); return 0;
             default:
@@ -949,33 +950,104 @@ internal static class Guardian
     }
 
     // ------------------------------------------------------------- shortcut
-    // Creates the desktop shortcut, or REPAIRS it when it points somewhere else.
+    // The rule, in the user's words: if a shortcut exists, do not add another one.
     //
-    // The original version only checked whether the .lnk existed. Any second copy
-    // of this exe (an extracted release, a test build) therefore rewrote the
-    // shortcut to its own location and, once that folder was deleted, left the
-    // user with a dead shortcut this code would never repair - it only ever asked
-    // "does the .lnk exist".
+    // Desktop shortcuts can live in two places - the user's Desktop folder and
+    // the shared Public Desktop - and either one is started by Windows. Earlier
+    // versions looked at only the first of them, so a shortcut in the other was
+    // invisible to this code and every run added one more to the folder it did
+    // look at. Duplicates are also possible after upgrading, or after a second
+    // copy of the exe has been run.
+    //
+    // So: scan both folders, drop every shortcut that duplicates one already
+    // present while agreeing on a target, then make sure exactly one valid
+    // shortcut exists.
     private static void EnsureShortcut()
     {
-        string lnk = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-            ShortcutName + ".lnk");
-        if (File.Exists(lnk) && ShortcutTargets(lnk)) return;
-        CreateShortcut(true);
+        List<string> found = ExistingShortcuts();
+
+        // Prefer the user's own Desktop as the one to keep; fall back to the
+        // shared one. Removing from the end first keeps the survivor stable.
+        string keep = null;
+        foreach (string p in found)
+        {
+            if (IsUserDesktop(p)) { keep = p; break; }
+        }
+        if (keep == null && found.Count > 0) keep = found[0];
+
+        foreach (string p in found)
+        {
+            if (p == keep) continue;
+            // Same exe already covered by the kept shortcut: this is a duplicate.
+            if (keep != null && ShortcutTargets(p)) { try { File.Delete(p); } catch { } }
+        }
+
+        if (keep != null)
+        {
+            // Repair rather than duplicate: a shortcut that exists but points at
+            // a deleted copy would otherwise be recreated non-stop.
+            if (ShortcutTargets(keep)) return;
+            WriteShortcut(keep);
+            return;
+        }
+
+        // Nothing pointing at us yet: create one, preferring the user's Desktop.
+        CreateShortcutIfAbsent();
     }
 
-    // True when the existing shortcut already points at this very executable.
-    // Any failure while reading it counts as "not correct", so the shortcut is
-    // rebuilt instead of being left broken.
+    // Every "DSH Guardian.lnk" in either Desktop folder.
+    private static List<string> ExistingShortcuts()
+    {
+        List<string> list = new List<string>();
+        foreach (string dir in ShortcutDirs())
+        {
+            try
+            {
+                if (Directory.Exists(dir))
+                {
+                    string p = Path.Combine(dir, ShortcutName + ".lnk");
+                    if (File.Exists(p) && !list.Contains(p)) list.Add(p);
+                }
+            }
+            catch { }
+        }
+        return list;
+    }
+
+    private static string[] ShortcutDirs()
+    {
+        List<string> dirs = new List<string>();
+        try { dirs.Add(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)); } catch { }
+        try { dirs.Add(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory)); } catch { }
+        try
+        {
+            string pub = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                @"..\Public\Desktop");
+            dirs.Add(Path.GetFullPath(pub));
+        }
+        catch { }
+        return dirs.ToArray();
+    }
+
+    private static bool IsUserDesktop(string p)
+    {
+        try
+        {
+            string mine = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            return string.Equals(Path.GetDirectoryName(p), mine, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
+
+    // True when the shortcut points at this very executable. Any failure while
+    // reading it counts as "not correct".
     private static bool ShortcutTargets(string lnk)
     {
         try
         {
-            Type t = Type.GetTypeFromProgID("WScript.Shell");
-            if (t == null) return false;
-            object shell = Activator.CreateInstance(t);
-            object shortcut = t.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { lnk });
+            object shortcut = OpenShortcut(lnk);
+            if (shortcut == null) return false;
             object target = shortcut.GetType().InvokeMember("TargetPath", BindingFlags.GetProperty, null, shortcut, null);
             string want = Assembly.GetExecutingAssembly().Location;
             string have = target as string;
@@ -985,34 +1057,67 @@ internal static class Guardian
         catch { return false; }
     }
 
-    private static void CreateShortcut(bool force)
+    private static object OpenShortcut(string lnk)
     {
-        string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        string lnk = Path.Combine(desktop, ShortcutName + ".lnk");
-        if (File.Exists(lnk) && !force) return;
+        Type t = Type.GetTypeFromProgID("WScript.Shell");
+        if (t == null) return null;
+        object shell = Activator.CreateInstance(t);
+        return t.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { lnk });
+    }
 
+    // Creates the shortcut on the user's Desktop unless one is already there,
+    // and on the shared Desktop if the user's own is not writable.
+    private static bool CreateShortcutIfAbsent()
+    {
+        string user = null, common = null;
+        try { user = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory); } catch { }
+        try { common = Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory); } catch { }
+
+        foreach (string dir in new string[] { user, common })
+        {
+            if (string.IsNullOrEmpty(dir)) continue;
+            try
+            {
+                if (!Directory.Exists(dir)) continue;
+                string lnk = Path.Combine(dir, ShortcutName + ".lnk");
+                WriteShortcut(lnk);
+                return true;
+            }
+            catch { }
+        }
+        return false;
+    }
+
+    private static void WriteShortcut(string lnk)
+    {
         string exe = Assembly.GetExecutingAssembly().Location;
         string icon = Path.Combine(BaseDir, "dsh-guardian.ico");
         if (!File.Exists(icon)) icon = WriteIcon();
 
-        Type t = Type.GetTypeFromProgID("WScript.Shell");
-        if (t == null) throw new InvalidOperationException("WScript.Shell unavailable");
-        object shell = Activator.CreateInstance(t);
-        try
+        object shortcut = OpenShortcut(lnk);
+        if (shortcut == null) throw new InvalidOperationException("WScript.Shell unavailable");
+        Type st = shortcut.GetType();
+        st.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { exe });
+        st.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { BaseDir });
+        st.InvokeMember("IconLocation", BindingFlags.SetProperty, null, shortcut, new object[] { icon });
+        st.InvokeMember("Description", BindingFlags.SetProperty, null, shortcut, new object[] { "DSH Guardian" });
+        st.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
+    }
+
+    // Explicit "recreate it" request from the menu / CLI: always (re)write the
+    // user's Desktop shortcut and remove duplicates elsewhere.
+    private static void ForceShortcut()
+    {
+        foreach (string p in ExistingShortcuts())
         {
-            object shortcut = t.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { lnk });
-            Type st = shortcut.GetType();
-            st.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { exe });
-            st.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { BaseDir });
-            st.InvokeMember("Description", BindingFlags.SetProperty, null, shortcut,
-                new object[] { "DSH Guardian - auto-rollback control panel" });
-            if (icon != null && File.Exists(icon))
-                st.InvokeMember("IconLocation", BindingFlags.SetProperty, null, shortcut, new object[] { icon + ",0" });
-            st.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
-            Console.WriteLine("desktop shortcut ready: " + lnk);        }
-        finally
+            if (!IsUserDesktop(p)) { try { File.Delete(p); } catch { } }
+        }
+        string user = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        WriteShortcut(Path.Combine(user, ShortcutName + ".lnk"));
+        // Keep only what we just wrote.
+        foreach (string p in ExistingShortcuts())
         {
-            if (shell != null && Marshal.IsComObject(shell)) Marshal.ReleaseComObject(shell);
+            if (!IsUserDesktop(p)) { try { File.Delete(p); } catch { } }
         }
     }
 
