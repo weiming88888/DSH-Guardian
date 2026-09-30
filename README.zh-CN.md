@@ -59,11 +59,19 @@ DSH 装插件是直接改配置文件的。插件有问题时，DSH 可能**启�
 
 ### 1. 下载
 
-下载仓库 ZIP 并解压到任意固定位置，例如 `D:\DS\崩溃回退`：
+**推荐：下载打包好的压缩包**（解压即用，含 exe + 源码 + 文档）：
+
+```
+https://github.com/weiming88888/DSH-Guardian/releases/latest
+```
+
+或从源码下载仓库 ZIP：
 
 ```
 https://github.com/weiming88888/DSH-Guardian/archive/refs/heads/main.zip
 ```
+
+解压到任意固定位置，例如 `D:\DS\崩溃回退`。
 
 ### 2. 运行
 
