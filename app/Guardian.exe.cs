@@ -220,7 +220,9 @@ internal static class Guardian
         Say("  dsh-guardian.exe preview     show the rollback plan, writes nothing");
         Say("  dsh-guardian.exe arm         start watching (runs with this window)");
         Say("  dsh-guardian.exe disarm      stop watching");
+        Say("  dsh-guardian.exe on | off    same as arm | disarm");
         Say("  dsh-guardian.exe shortcut    create the desktop shortcut (manual only)");
+        Say("  dsh-guardian.exe help | ?    this text");
         Say("");
         Say("Nothing runs in the background: the watcher is started from the menu");
         Say("and stops when this window closes. There is no scheduled task.");
