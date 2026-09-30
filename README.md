@@ -1,6 +1,6 @@
 # DSH Guardian
 
-**Automatic rollback for DeepSeek Harness (DSH).**
+**Automatic rollback for DeepSeek Harness *Desktop* (the Windows app).**
 
 Install a plugin, DSH refuses to start, and you are left editing JSON by hand.
 DSH Guardian watches for exactly that: when a newly installed plugin makes DSH
@@ -8,6 +8,40 @@ fail to boot, it restores the last known-good configuration, reconciles the
 dependencies and relaunches DSH.
 
 > English · [中文](README.zh-CN.md) · [Detailed Chinese guide](docs/GUIDE-zh.md) · [Technical reference](docs/TECHNICAL.md)
+
+---
+
+## For DSH Desktop (the Windows app)
+
+**This tool is for the DeepSeek Harness *desktop application* — the Electron app
+you install on Windows — and it targets the `desktop` profile.**
+
+It is *not* a general-purpose DSH tool, and it will not work as one:
+
+| | |
+|---|---|
+| Target | The `desktop` profile at `%USERPROFILE%\.dsh\profiles\desktop` |
+| Platform | Windows only (uses `AllocConsole`, `MessageBoxW`, `WScript.Shell`) |
+| Also required | Windows PowerShell 5.1, which ships with Windows |
+| Not for | A DSH command-line install, or any profile the desktop app does not manage |
+
+The reason it is desktop-specific is in the dependency step. The DSH CLI
+**refuses** to touch a profile that the desktop app manages:
+
+```
+dsh plugin --profile desktop install   ->  rejected ("managed exclusively by
+                                           the Electron application")
+```
+
+So instead of going through the CLI, DSH Guardian calls the **app's own bundled
+pnpm** (`resources\runtime\pnpm\dist\pnpm.mjs`, run with the runtime's own
+`node.exe`) inside the profile directory. That path only exists in the desktop
+installation — which is exactly why this tool is built around it.
+
+If you use a different DSH layout, the configuration plane it protects
+(`package.json`, `pnpm-lock.yaml`, `cordis.patch.yml`, `cordis.yml`,
+`pnpm-workspace.yaml`, `compatibility.json`) is still the right idea, but the
+dependency reconciliation will need its own command.
 
 ---
 
@@ -242,9 +276,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "app\build.ps1"
 
 ## Requirements
 
+- **DeepSeek Harness Desktop** (the Windows app) installed, with a `desktop`
+  profile - not a CLI-only installation
 - Windows (uses `AllocConsole`, `MessageBoxW`, `WScript.Shell`)
 - Windows PowerShell 5.1 (ships with Windows)
-- DeepSeek Harness installed, with a `desktop` profile
 
 ## Notes and limits
 
