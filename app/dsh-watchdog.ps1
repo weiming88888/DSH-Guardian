@@ -905,11 +905,18 @@ if ($alive) {
                 $rescue = Invoke-AutoRollback -Pointer $pointer -State $state -Reason 'startup crash loop'
                 $state.autoRollbacks = [int]$rollbackCount + 1
                 $state.lastAutoRollbackAt = (Get-Date).ToString('o')
-                # Remember the config we just tried and failed, so we never
-                # roll back this same configuration a second time.
-                $state | Add-Member -NotePropertyName configFingerprintAtRollback -NotePropertyValue $fpJson -Force
                 # The restored plane becomes the new baseline.
                 $state.configFingerprint = ((Get-ConfigFingerprint | ForEach-Object { $_ | ConvertTo-Json -Compress }) -join '|')
+                # Record the configuration this attempt RESULTED in, so the next
+                # round can tell "DSH is still down on the config we already
+                # tried" from "the user changed something since".
+                #
+                # This must be read AFTER the restore. Storing the pre-restore
+                # fingerprint here compared two different moments (before vs
+                # after the restore) and so was never equal, which silently
+                # disabled the "never roll back the same configuration twice"
+                # guard -- only the MaxAutoRollbacks cap was left holding.
+                $state | Add-Member -NotePropertyName configFingerprintAtRollback -NotePropertyValue $state.configFingerprint -Force
                 $canAutoRollback = $false
             }
         } elseif ($AutoRollback -and -not $canAutoRollback) {
