@@ -1,8 +1,23 @@
 # DSH Guardian - technical README
 
-Automatic rollback for DeepSeek Harness (DSH): if a newly installed plugin makes
-DSH fail to start, the config plane is restored to the last known-good version,
-dependencies are reconciled, and DSH is relaunched.
+Automatic rollback for **DeepSeek Harness Desktop** (the Windows Electron app):
+if a newly installed plugin makes DSH fail to start, the config plane is restored
+to the last known-good version, dependencies are reconciled, and DSH is
+relaunched.
+
+**Scope:** the `desktop` profile only (`%USERPROFILE%\.dsh\profiles\desktop`),
+on Windows. This is not a general-purpose DSH tool. Dependency reconciliation
+deliberately bypasses the DSH CLI, which rejects any profile the desktop app
+manages:
+
+```
+dsh plugin --profile desktop install   ->  rejected ("managed exclusively by
+                                           the Electron application")
+```
+
+so the app's own bundled pnpm (`resources\runtime\pnpm\dist\pnpm.mjs` with the
+runtime's `node.exe`) is invoked inside the profile directory instead. That path
+exists only in a desktop installation.
 
 This file is the **technical** reference. The user-facing guide (Chinese) is
 `GUIDE-zh.md` in the same folder.
