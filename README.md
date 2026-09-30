@@ -1,39 +1,79 @@
 # DSH Guardian
 
-Automatic rollback for **DeepSeek Harness (DSH)**.
+**Automatic rollback for DeepSeek Harness (DSH).**
 
 Install a plugin, DSH refuses to start, and you are left editing JSON by hand.
 DSH Guardian watches for exactly that: when a newly installed plugin makes DSH
 fail to boot, it restores the last known-good configuration, reconciles the
 dependencies and relaunches DSH.
 
-> English · [中文](README.zh-CN.md) · [详细中文说明](docs/GUIDE-zh.md) · [Technical reference](docs/TECHNICAL.md)
+> English · [中文](README.zh-CN.md) · [Detailed Chinese guide](docs/GUIDE-zh.md) · [Technical reference](docs/TECHNICAL.md)
 
-```
-   DSH Guardian  ·  DSH 崩溃自动回退
-==========================================================
-   1. 查看错误日志      —— 崩了先看这里，含 DSH 原始报错
-   2. 回退 / 切换目标   —— 选一个版本：现在回退，或只作以后的目标
-   3. 打基线            —— 把当前状态记为一个“好版本”
-   4. 自动检查: 关      —— 按此键开关自动回退
-   0. 退出
-```
+---
+
+## The problem
+
+Installing a DSH plugin edits configuration files directly. If the plugin is
+broken, DSH can **fail at startup**, and DSH has no rollback of its own: you are
+left reading `package.json` and `pnpm-lock.yaml` and guessing which plugin did it.
+
+DSH Guardian covers that gap. While you arm it, it watches DSH and on a proven
+startup crash loop it automatically:
+
+1. captures the crash evidence (DSH's own stderr),
+2. preserves your broken configuration (nothing is lost),
+3. restores the last known-good version,
+4. reconciles the dependencies,
+5. relaunches DSH.
+
+Normally you just see DSH come back up.
 
 ## Nothing runs in the background
 
-This is a hard design rule, not a nicety:
+This is a hard design rule, not an aspiration:
 
 | | |
 |---|---|
 | Scheduled task | **none** |
 | Autostart / Run key | **none** |
-| Resident process when idle | **none** |
-| Started by | the shortcut, and only when you press `4` |
-| Stopped by | closing that window (the watcher is bound to it) |
+| Resident process when idle | **none, zero memory** |
+| Started by | opening it, and only when you press `4` |
+| Stopped by | closing that window |
 
 The watcher is launched with `-Resident -ParentPid <launcher pid>` and exits by
-itself when that process disappears, so it can never outlive the window you
-opened. Close the window and the tool is genuinely gone.
+itself when that process disappears, so it cannot outlive the window that asked
+for it.
+
+## The menu
+
+```
+==========================================================
+   DSH Guardian  ·  DSH crash auto-rollback
+==========================================================
+   1. 查看错误日志      —— error log; start here after a crash
+   2. 回退 / 切换目标   —— pick a version: roll back now, or just set the target
+   3. 打基线            —— record the current state as a good version
+   4. 自动检查: 关      —— toggles watching on / off
+   0. 退出
+==========================================================
+
+【当前状态】
+  监视状态 : 未运行 —— not watching; nothing is running
+  上次检查 : 4 分钟前
+  回退目标 : 20260930-124301-known-good
+```
+
+(The UI itself is Chinese; this is a translation of the labels.)
+
+### Keys
+
+| Key | Name | What it does |
+|:---:|---|---|
+| `1` | Error log | Why did it crash, where. **Check this first** |
+| `2` | Roll back / set target | Lists every kept version; then asks whether to roll back now or only set the future target |
+| `3` | Baseline | Records the current state as a good version (adds one, never overwrites) |
+| `4` | Auto-check | On/off. Only watches while **on** |
+| `0` | Quit | Exits (watching stops too) |
 
 ## Install
 
@@ -41,32 +81,42 @@ opened. Close the window and the tool is genuinely gone.
    **[Releases](https://github.com/weiming88888/DSH-Guardian/releases/latest)**.
    It extracts to a single `DSH-Guardian-<version>\` folder - put that folder
    somewhere permanent, e.g. `D:\DS\`.
-2. Double-click `app\dsh-guardian.exe`. A Chinese menu opens in a console
-   window and a desktop shortcut is created automatically.
+2. Double-click `app\dsh-guardian.exe`. A Chinese menu opens in a console window
+   and a desktop shortcut is created automatically.
 3. Press `3` once to record the current working state as your first baseline.
 
-There is no installer and no registry write. Deleting the folder removes the
-tool completely.
+There is no installer and no registry write. Delete the folder and the tool is
+gone completely.
 
 ## Use
 
 ```
 Before installing a plugin : open it, press 4 to arm, KEEP THE WINDOW OPEN
-After  installing a plugin : DSH boots fine -> press 3 to re-baseline
+After  installing a plugin : DSH boots fine -> press any key for the menu
+                             -> press 3 to re-baseline
                              -> press 4 to disarm -> close the window
 ```
 
-That is the whole workflow. The window *is* the switch: while it is open the
-watcher runs; close it and everything stops.
+That is the whole workflow. The rest of the time there is nothing to do, because
+nothing is running.
+
+> **The window *is* the switch.** Window open = watching; window closed = stopped.
+> After pressing `4` the window sits in a "watching" state. That is expected, not
+> a freeze.
 
 ### What happens when DSH crashes
 
 With the window open and auto-check armed:
 
-1. Probe fails -> relaunch DSH -> fails again, up to `BootRetryBudget` times.
-2. Startup crash loop is proven.
-3. Crash evidence is captured (the child's stdout+stderr).
-4. The broken config is preserved to `data\snapshots\pre-restore-<stamp>\`.
+1. The port probe fails. DSH is relaunched.
+2. If it keeps failing, a startup crash loop is *proven* - by either of two
+   independent signals: `-CrashLoopThreshold` launches (default 3) died within
+   `-StartGraceSeconds` (default 45 s), **or** the relaunch budget
+   `-BootRetryBudget` (default 3) is exhausted and DSH never answered.
+3. Crash evidence is captured: the child's stdout+stderr, per launch, under
+   `data\console\`.
+4. Your broken configuration is preserved to
+   `data\snapshots\pre-restore-<stamp>\`.
 5. The last known-good snapshot is restored.
 6. `node_modules` is reconciled with the restored lockfile.
 7. DSH is relaunched.
@@ -75,14 +125,57 @@ With the window open and auto-check armed:
 
 | Guard | Effect |
 |---|---|
-| no baseline yet | refuses to roll back, logs `ROLLBACK-IMPOSSIBLE` |
-| config unchanged since last rollback | **never rolls back the same configuration twice** |
-| rollback did not help | stops relaunching and says so once, instead of looping |
-| `-MaxAutoRollbacks` (default 2) | hard cap per crash episode |
+| No baseline yet | Refuses to roll back and says so explicitly, instead of guessing |
+| Same configuration already rolled back | **Never rolls back the same configuration twice** |
+| Rollback did not help | Stops relaunching and says so once, rather than looping |
+| `-MaxAutoRollbacks` (default 2) | Hard cap per crash episode |
 
-Manual rollback is always reversible: the current config is copied aside before
-anything is written, and you can roll back to *any* saved snapshot, not just the
-newest one.
+Every message is deduplicated by signature, so a watcher that runs for hours does
+not drown the log in repeats.
+
+## Baselines
+
+**You can keep many.** Each press of `3` adds a snapshot; older ones are never
+deleted.
+
+**But automatic rollback uses exactly one of them** - the *current target*, shown
+on the 「回退目标」 line of the menu. It normally points at the newest baseline.
+
+**When would you change it?** Say you installed plugin A, then plugin B, and B
+broke DSH:
+
+| Target points at | Rolling back gives you |
+|---|---|
+| Newest baseline (before B) | **A stays** - you only wanted B gone |
+| An older baseline (before A) | **A and B are both gone** |
+
+Pressing `2` lists them all and marks the active one, then asks what to do:
+
+| Button | Effect |
+|---|---|
+| 【Yes】 | Roll back to it **now** |
+| 【No】 | Don't roll back; just make it the target for **future** crashes |
+| 【Cancel】 | Do nothing |
+
+### Three ways to cancel
+
+| Where | How | Result |
+|---|---|---|
+| Version list | Type `0`, or just press Enter | Nothing happens |
+| Action dialog | Click 【Cancel】 | Nothing happens |
+| Action dialog | Click 【No】 | No rollback; only sets the future target |
+
+**Manual rollback is always reversible**: before anything is written, the current
+configuration is copied to `data\snapshots\pre-restore-<stamp>\`, and you can roll
+back to it later like any other snapshot.
+
+### The `-2` suffix
+
+Snapshot names have one-second resolution (`snap-20260930-134944-known-good`). If
+you take two baselines **inside the same second**, the second becomes
+`...-known-good-2`. This is deliberate: an existing snapshot is **never
+overwritten**. The same applies to `pre-restore-` backups. Normal use (more than a
+second apart) never produces a suffix.
 
 ## Command line
 
@@ -97,10 +190,27 @@ dsh-guardian.exe disarm     stop watching
 dsh-guardian.exe shortcut   recreate the desktop shortcut
 ```
 
+`dsh-snapshot.ps1` additionally accepts
+`-Action Create | List | Verify | Restore | Mark-Good | Promote`, plus `-DryRun`
+and `-Force`. `Restore` without `-Force` only prints what it would do.
+
+## Reporting a problem
+
+Double-click the **「DSH Guardian 诊断」** desktop shortcut. It collects
+everything needed to diagnose a fault and writes a Chinese report to
+`data\诊断报告\诊断报告-<date>-<time>.txt`, then opens both the report and its
+folder.
+
+The report contains: program type (PE subsystem), script encoding check, mode,
+watcher liveness, scheduled-task and autostart presence, DSH profile state, port
+probes, all logs, crash evidence and the snapshot list. **It contains no
+passwords, keys or account information.** Attach it to an
+[issue](https://github.com/weiming88888/DSH-Guardian/issues).
+
 ## Layout
 
 ```
-app\                              program (ASCII file names on purpose)
+app\                               program (ASCII file names on purpose)
   dsh-guardian.exe                   launcher + menu (GUI subsystem)
   dsh-watchdog.ps1                   probe / decide / roll back
   dsh-snapshot.ps1                   snapshots, restore, promote
@@ -110,18 +220,23 @@ app\                              program (ASCII file names on purpose)
   build.ps1                          rebuild with csc
   dsh-guardian.ico                   icon
 docs\
-  GUIDE-zh.md                        user guide (Chinese, start here)
-  README.md                          this file
+  GUIDE-zh.md                        full user guide (Chinese)
+  TECHNICAL.md                       technical reference (English)
 data\                              created at runtime, NOT in this repo
+  mode.json / state.json / last-tick.json / last-known-good.json / runtime.pid
+  watchdog.log / events.jsonl / exe-trace.log / child-stderr.log / menu-error.log
+  console\                           captured stdout+stderr from DSH launches
+  snapshots\                         snap-<stamp>-<label>\ and pre-restore-<stamp>\
+  诊断报告\                           generated diagnostic reports
 ```
 
 ## Rebuilding
 
+Only the .NET Framework `csc.exe` that ships with Windows is needed - **no SDK**:
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "app\build.ps1"
 ```
-
-Requires only the .NET Framework `csc.exe` that ships with Windows. No SDK.
 
 ## Requirements
 
@@ -131,30 +246,36 @@ Requires only the .NET Framework `csc.exe` that ships with Windows. No SDK.
 
 ## Notes and limits
 
-- **The DSH port is assumed to be 19387.** DSH's own default is 3080. A
-  mismatched port makes the probe report a crash that is not happening, so check
-  this before arming.
+- **The DSH port is assumed to be 19387.** DSH's own default is 3080. A mismatched
+  port makes the probe report a crash that is not happening, so verify this before
+  arming.
 - The watcher only runs while its window is open. That is the price of "nothing
   runs unless I open it"; the two cannot both be satisfied.
-- Only the config plane is touched: `package.json`, `pnpm-lock.yaml`,
-  `cordis.patch.yml`, `cordis.yml`, `pnpm-workspace.yaml`, `compatibility.json`.
-  Your sessions and credentials are never read. `node_modules` is never deleted,
-  only reconciled.
+- The probe is a **TCP connect** to `127.0.0.1:<port>` (default timeout 3 s), not
+  an HTTP request. Granularity is therefore "is the port answering", not
+  in-process transient errors.
+- Only these six configuration files are ever touched: `package.json`,
+  `pnpm-lock.yaml`, `cordis.patch.yml`, `cordis.yml`, `pnpm-workspace.yaml`,
+  `compatibility.json`. Your sessions and credentials are never read.
+  `node_modules` is never deleted, only reconciled.
 - `dsh plugin --profile <name> install` is rejected by the DSH CLI for an
-  Electron-managed profile; the app's own bundled pnpm is invoked directly
-  instead.
+  Electron-managed profile, so the app's own bundled pnpm is invoked directly
+  instead (`resources\runtime\pnpm\dist\pnpm.mjs` with the runtime's
+  `node.exe`), running `install --no-frozen-lockfile` in the profile directory.
+- The resident watcher has a lifetime cap (`-MaxResidentMinutes`, default 240) so
+  a forgotten window cannot watch forever.
 
 ## Two Windows encoding traps
 
-Both cost real debugging time; they are documented in full in
-`docs\TECHNICAL.md`, and the short version is:
+Both cost real debugging time. They are documented in full in
+[docs/TECHNICAL.md](docs/TECHNICAL.md); the short version:
 
-- **`.ps1` must be pure ASCII** unless it has a UTF-8 BOM. PowerShell 5.1 reads
-  BOM-less scripts with the system ANSI code page, so a Chinese literal in the
-  source corrupts parsing. Chinese output is stored as UTF-8 hex and decoded at
-  runtime.
-- **`.cmd` must be pure ASCII *and* CRLF.** `cmd.exe` decodes batch files with
-  the OEM code page, and a bare LF can make it read several lines as one.
+- **`.ps1` must be pure ASCII** unless it has a UTF-8 BOM. Windows PowerShell 5.1
+  reads BOM-less scripts with the system ANSI code page, so a Chinese literal in
+  the source corrupts parsing. Chinese output is stored as UTF-8 hex and decoded
+  at runtime.
+- **`.cmd` must be pure ASCII *and* CRLF.** `cmd.exe` decodes batch files with the
+  OEM code page, and a bare LF can make it read several lines as one.
 
 ## License
 
