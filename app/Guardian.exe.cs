@@ -949,12 +949,40 @@ internal static class Guardian
     }
 
     // ------------------------------------------------------------- shortcut
+    // Creates the desktop shortcut, or REPAIRS it when it points somewhere else.
+    //
+    // The original version only checked whether the .lnk existed. Any second copy
+    // of this exe (an extracted release, a test build) therefore rewrote the
+    // shortcut to its own location and, once that folder was deleted, left the
+    // user with a dead shortcut this code would never repair - it only ever asked
+    // "does the .lnk exist".
     private static void EnsureShortcut()
     {
         string lnk = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
             ShortcutName + ".lnk");
-        if (!File.Exists(lnk)) CreateShortcut(false);
+        if (File.Exists(lnk) && ShortcutTargets(lnk)) return;
+        CreateShortcut(true);
+    }
+
+    // True when the existing shortcut already points at this very executable.
+    // Any failure while reading it counts as "not correct", so the shortcut is
+    // rebuilt instead of being left broken.
+    private static bool ShortcutTargets(string lnk)
+    {
+        try
+        {
+            Type t = Type.GetTypeFromProgID("WScript.Shell");
+            if (t == null) return false;
+            object shell = Activator.CreateInstance(t);
+            object shortcut = t.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { lnk });
+            object target = shortcut.GetType().InvokeMember("TargetPath", BindingFlags.GetProperty, null, shortcut, null);
+            string want = Assembly.GetExecutingAssembly().Location;
+            string have = target as string;
+            return !string.IsNullOrEmpty(have)
+                && string.Equals(have, want, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
     }
 
     private static void CreateShortcut(bool force)
