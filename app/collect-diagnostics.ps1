@@ -131,11 +131,56 @@ function Add-Section {
 function Add-File {
     param([string]$Path, [int]$Tail = 300)
     Add-Line ('--- ' + $Path + ' ---')
-    if (Test-Path -LiteralPath $Path) {
-        try { Get-Content -LiteralPath $Path -Tail $Tail -ErrorAction Stop | ForEach-Object { Add-Line $_ } }
-        catch { Add-Line ('(' + (T 'L_readfail') + ': ' + $_.Exception.Message + ')') }
-    } else {
+    if (-not (Test-Path -LiteralPath $Path)) {
         Add-Line ('(' + (T 'L_filemiss') + ')')
+        return
+    }
+    # Decode the bytes ourselves instead of using Get-Content.
+    #
+    # Two reasons. (1) Get-Content without -Encoding uses the system ANSI code
+    # page for a BOM-less file, and the logs collected here are written as UTF-8
+    # without a BOM, so all the Chinese in PowerShell error messages came out as
+    # mojibake in the report. (2) Windows PowerShell 5.1's -Encoding parameter
+    # takes a FileSystemCmdletProviderEncoding enum, not a System.Text.Encoding
+    # object, so the chosen encoding cannot be passed through.
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($Path)
+        $enc = $null
+        if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+            $enc = New-Object System.Text.UTF8Encoding($false)          # UTF-8 with BOM
+        } elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
+            $enc = [System.Text.Encoding]::Unicode                      # UTF-16 LE
+        } else {
+            # No BOM: strict UTF-8 first, and only fall back to ANSI when the
+            # bytes really are not valid UTF-8.
+            try {
+                $strict = New-Object System.Text.UTF8Encoding($false, $true)
+                $null = $strict.GetString($bytes)
+                $enc = New-Object System.Text.UTF8Encoding($false)
+            } catch {
+                $enc = [System.Text.Encoding]::Default
+            }
+        }
+        $text = $enc.GetString($bytes)
+        # Decoding does not strip a BOM: it arrives as U+FEFF and would show up
+        # as a stray character at the start of the first line. Most of these
+        # files are written by PowerShell's Set-Content -Encoding utf8, which
+        # DOES emit a BOM, so this matters for nearly every log collected.
+        if ($text.Length -gt 0 -and [int][char]$text[0] -eq 0xFEFF) {
+            $text = $text.Substring(1)
+        }
+        $lines = $text -split "`r`n|`n|`r"
+        # Trailing newline produces one empty element; drop it so -Tail matches
+        # what Get-Content would have returned.
+        if ($lines.Count -gt 0 -and $lines[$lines.Count - 1] -eq '') {
+            $lines = $lines[0..($lines.Count - 2)]
+        }
+        if ($Tail -gt 0 -and $lines.Count -gt $Tail) {
+            $lines = $lines[($lines.Count - $Tail)..($lines.Count - 1)]
+        }
+        foreach ($l in $lines) { Add-Line $l }
+    } catch {
+        Add-Line ('(' + (T 'L_readfail') + ': ' + $_.Exception.Message + ')')
     }
 }
 
