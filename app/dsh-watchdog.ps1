@@ -392,10 +392,20 @@ function Start-DshCaptured {
     param([string]$Command)
     if ($Command -match '[&\|<>^%]') { throw "launch command contains shell metacharacters; refusing: $Command" }
 
+    # Every launcher file name carries our pid.
+    #
+    # A seconds-resolution stamp alone is NOT unique: two launches inside the
+    # same second (relaunch after a rescue, or the install step racing the
+    # relaunch) produced the same file name, and the second Set-Content hit a
+    # file the first wscript.exe still had open --
+    #   "Launch failed: The process cannot access the file ... launch-captured.vbs
+    #    because it is being used by another process."
+    # The pid is unique for the life of this process, so collisions are gone.
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $tag = "$stamp-$PID"
     $outLog = Join-Path $ConsoleDir "console-$stamp.log"
-    $cmdFile = Join-Path $DataDir 'launch-captured.cmd'
-    $vbsFile = Join-Path $DataDir 'launch-captured.vbs'
+    $cmdFile = Join-Path $DataDir "launch-captured-$tag.cmd"
+    $vbsFile = Join-Path $DataDir "launch-captured-$tag.vbs"
 
     # stderr is the only place installFailLoud writes its diagnostic, so it must
     # be redirected; the cmd wrapper stays, but is started with no console.
@@ -497,8 +507,11 @@ function Invoke-ProfileInstall {
         return [pscustomobject]@{ Ok = $false; Message = ('profile dir missing: {0}' -f $ProfileDir); Log = $null }
     }
 
-    $log = Join-Path $ConsoleDir ('install-{0}.log' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
-    $cmdFile = Join-Path $DataDir 'post-rollback-install.cmd'
+    # Pid-tagged for the same reason as the launch files above: a bare second
+    # stamp collides when the install and the relaunch happen inside one second.
+    $tag = (Get-Date -Format 'yyyyMMdd-HHmmss') + "-$PID"
+    $log = Join-Path $ConsoleDir ('install-{0}.log' -f $tag)
+    $cmdFile = Join-Path $DataDir "post-rollback-install-$tag.cmd"
     $body = @(
         '@echo off',
         ('set "DSH_HOME={0}"' -f $DshHome),
@@ -508,7 +521,7 @@ function Invoke-ProfileInstall {
     ) -join "`r`n"
     Set-Content -LiteralPath $cmdFile -Value $body -Encoding ascii
 
-    $vbsFile = Join-Path $DataDir 'post-rollback-install.vbs'
+    $vbsFile = Join-Path $DataDir "post-rollback-install-$tag.vbs"
     New-HiddenRunVbs -VbsFile $vbsFile -TargetCommand ('cmd.exe /c "{0}"' -f $cmdFile) | Out-Null
 
     $proc = Start-Process -FilePath 'wscript.exe' -ArgumentList ('"{0}"' -f $vbsFile) -WindowStyle Hidden -PassThru
@@ -579,15 +592,12 @@ function Invoke-AutoRollback {
 
     $target = Join-Path $Pointer.snapshotRoot $Pointer.snapshot
 
-    # Preserve the broken config before overwriting it.
-    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $preDir = Join-Path $Pointer.snapshotRoot "pre-restore-$stamp"
-    New-Item -ItemType Directory -Force -Path $preDir | Out-Null
-    # One pass: back up what exists now. The same set is restored below.
-    $present = @($ConfigPlane | Where-Object { Test-Path -LiteralPath (Join-Path $ProfileDir $_) })
-    foreach ($n in $present) {
-        Copy-Item -LiteralPath (Join-Path $ProfileDir $n) -Destination (Join-Path $preDir $n) -Force
-    }
+    # NOTE: the broken config is preserved by the snapshot script itself, which
+    # copies the current state to pre-restore-<stamp> before writing anything.
+    # This function used to make its OWN copy first, so every automatic rollback
+    # left TWO identical pre-restore directories for the same broken config.
+    $preStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $preDir = $null
 
     $restored = @()
     $deleted = @()
@@ -601,12 +611,24 @@ function Invoke-AutoRollback {
             & $snapshotScript -Action Restore -Force -Snapshot $Pointer.snapshot -SnapshotRoot $Pointer.snapshotRoot -ProfileName $ProfileName -DshHome $DshHome *>&1 |
                 ForEach-Object { Write-Log ("  restore: {0}" -f $_) }
             $restored = @($ConfigPlane | Where-Object { Test-Path -LiteralPath (Join-Path $ProfileDir $_) })
+            # The script names that backup from its own clock reading, so check
+            # both its stamp and ours before giving up on reporting it.
+            foreach ($cand in @($preStamp, (Get-Date -Format 'yyyyMMdd-HHmmss'))) {
+                $p = Join-Path $Pointer.snapshotRoot "pre-restore-$cand"
+                if (Test-Path -LiteralPath $p) { $preDir = $p; break }
+            }
         } catch {
             $err = $_.Exception.Message
         }
     } else {
-        # Fallback: restore the plane directly.
+        # Fallback: no snapshot script, so do the backup here and restore the
+        # plane directly.
         Write-Log '  snapshot script missing; restoring directly' 'WARN'
+        $preDir = Join-Path $Pointer.snapshotRoot "pre-restore-$preStamp"
+        New-Item -ItemType Directory -Force -Path $preDir | Out-Null
+        foreach ($n in @($ConfigPlane | Where-Object { Test-Path -LiteralPath (Join-Path $ProfileDir $_) })) {
+            Copy-Item -LiteralPath (Join-Path $ProfileDir $n) -Destination (Join-Path $preDir $n) -Force
+        }
         foreach ($n in $ConfigPlane) {
             $src = Join-Path $target $n
             $dst = Join-Path $ProfileDir $n
@@ -773,23 +795,26 @@ if ($state.configFingerprint -and $state.configFingerprint -ne $fpJson) {
     Write-Log 'Config plane changed (a plugin was most likely installed or removed)' 'INFO'
     $snapScript = Join-Path $PSScriptRoot 'dsh-snapshot.ps1'
     Write-Log ('  take a snapshot once health is confirmed: powershell -File "{0}" -Action Create' -f $snapScript) 'INFO'
+    # Only advance the stored fingerprint when it actually differs. Assigning it
+    # unconditionally every round made this comparison permanently false, so the
+    # "a plugin was installed" notice could never be printed a second time.
+    $state.configFingerprint = $fpJson
 }
-$state.configFingerprint = $fpJson
 
 if ($alive) {
     if (-not $state.lastHealthy -or $state.lastFail) {
         Write-Log ("DSH healthy (127.0.0.1:{0} listening, {1} matching process(es))" -f $Port, $procs.Count)
     }
     $state.lastHealthy = $now.ToString('o')
-    $state.lastStartWasHealthy = $true
     $state.failStreak = 0
-    # Deliberately NOT resetting shortLivedStarts here. This branch is reached
-    # whenever the port answers, which includes the moment a crashed process is
-    # still shutting down. Resetting here would erase the crash-loop counter
-    # every round and the threshold could never be reached. The counter is
-    # cleared only by a launch that survives (see the crash-loop block).
-    $state.lastNotifiedCrashLoop = $false
-    Set-Prop $state 'failNotified' $false
+    # Clear the crash-loop notice only when a launch WE performed has survived.
+    # A bare healthy probe is not enough: while a crashed instance is still
+    # shutting down the port can answer for a round, and resetting here made the
+    # watchdog announce the same crash loop on every round instead of once per
+    # episode. shortLivedStarts is handled further down, only when the launch
+    # survived past the grace window.
+    if ($state.lastStartWasHealthy) { $state.lastNotifiedCrashLoop = $false }
+    $state.lastStartWasHealthy = $true
 } elseif ($state.lastStartAt -and
           -not $state.lastStartWasHealthy -and
           -not $state.lastHealthy -and
@@ -855,7 +880,13 @@ if ($alive) {
     # rollback, i.e. this is a fresh crash episode. lastNotifiedCrashLoop must
     # not carry over from the previous episode, or the second and every later
     # plugin-induced crash would be silently ignored and never rolled back.
-    if ($configMovedSinceRollback) {
+    #
+    # $lastRollbackAt is required here. configMovedSinceRollback defaults to true
+    # for the very first episode (there is no rollback to compare against yet),
+    # so without it this reset fired on every round of a crash loop that had
+    # never rolled back -- the notice re-armed itself and the log filled with
+    # one identical "crash loop proven" / "no known-good snapshot" pair per round.
+    if ($lastRollbackAt -and $configMovedSinceRollback) {
         $state.lastNotifiedCrashLoop = $false
         Set-Prop $state 'failNotified' $false
     }
