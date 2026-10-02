@@ -30,6 +30,8 @@ New to DSH and about to install a plugin? This is the whole workflow.
 Afterwards: DSH boots fine → press `3` again (new baseline) → press `4` to disarm
 → close the window. That's it.
 
+![The menu](docs/menu.png)
+
 > **The window is the switch.** Open = watching. Closed = stopped. It is not a
 > freeze. Guardian does not add a scheduled task, does not autostart, and uses
 > zero memory when the window is closed.
