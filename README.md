@@ -56,11 +56,11 @@ Eight of them, in one row. The interface is Chinese; this is what each one means
 The status line is the one to read: `○ 未监视` not watching · `● 监视中` watching ·
 `◐ 已开启，监视器启动中…` armed, watcher starting.
 
-## The window is the switch
+## The window is the switch (by default — changeable)
 
-A hard design rule, not a preference:
+The **default** behaviour, not a preference:
 
-| | |
+| | Default |
 |---|---|
 | Scheduled task | **none** |
 | Autostart / registry Run key | **none** |
@@ -74,6 +74,17 @@ window's process goes away the watcher exits too, and the log records
 
 **So closing the window stops monitoring** — it never keeps running behind your back.
 Worth knowing before you close it and walk away to install a plugin.
+
+**Want it to keep watching after the window closes?** Tick
+「**关窗后继续监视**」 next to the buttons. The watcher is then started *without*
+`-ParentPid`, so it survives the window: `runtime.pid` stays, and reopening the
+window shows `● 监视中` until you click 开关监视 to stop it.
+
+> The two behaviours cannot both hold, which is why this is a setting rather than a
+> default: the default is "closing stops it", because that is what makes the sentence
+> above true. Turn it on when you need to watch something for a long time.
+> Stored in `data\gui-settings.json`; takes effect the **next** time you click 开关监视.
+
 
 ## What happens when a plugin breaks DSH
 

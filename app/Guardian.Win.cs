@@ -346,6 +346,7 @@ namespace GuardianGui
 
         // ---- controls --------------------------------------------------------
         private Label detailLine;
+        private CheckBox keepBox;
         private Label statusLine;
         private FlowLayoutPanel actions;
         private GroupBox statusZone;
@@ -435,6 +436,37 @@ namespace GuardianGui
             actions.MinimumSize = new Size(0, 46);
             actions.SizeChanged += delegate { LayoutActionsRow(layout, actions); };
             actions.ControlAdded += delegate { LayoutActionsRow(layout, actions); };
+
+            // The one setting, next to the buttons that it governs.
+            //
+            // It sits here rather than in a dialog because the decision it controls --
+            // what happens when this window closes -- is made while looking at the
+            // window, and a setting nobody finds is the same as no setting.
+            keepBox = new CheckBox();
+            keepBox.AutoSize = false;
+            keepBox.Height = ButtonHeightPx;
+            keepBox.Width = ButtonWidthPx + 76;
+            keepBox.Margin = new Padding(ButtonGap * 2, 0, 0, ButtonGap);
+            keepBox.TextAlign = ContentAlignment.MiddleLeft;
+            keepBox.Padding = new Padding(0, 0, 0, 0);
+            keepBox.Font = new Font("Microsoft YaHei UI", 9.75F);
+            keepBox.ForeColor = Theme.Text;
+            keepBox.BackColor = Theme.Card;
+            keepBox.Text = T("\u5173\u7A97\u540E\u7EE7\u7EED\u76D1\u89C6");
+            keepBox.Checked = KeepWatchingAfterClose;
+            new ToolTip().SetToolTip(keepBox,
+                T("\u52FE\u4E0A\uFF1A\u5173\u6389\u7A97\u53E3\u540E\u76D1\u89C6\u5668\u7EE7\u7EED\u8DD1\uFF0C\u9700\u8981\u624B\u52A8\u505C\u6B62\u3002")
+                + Environment.NewLine
+                + T("\u4E0D\u52FE\uFF08\u9ED8\u8BA4\uFF09\uFF1A\u5173\u7A97\u53E3\u5373\u505C\u6B62\u76D1\u89C6\uFF0C\u4E0D\u4F1A\u6709\u540E\u53F0\u8FDB\u7A0B\u3002"));
+            keepBox.CheckedChanged += delegate
+            {
+                KeepWatchingAfterClose = keepBox.Checked;
+                UpdateStatus();
+                Append(keepBox.Checked
+                    ? T("\u5DF2\u8BBE\u4E3A\uFF1A\u5173\u7A97\u53E3\u540E\u7EE7\u7EED\u76D1\u89C6\u3002\u4E0B\u6B21\u70B9\u300C\u5F00\u5173\u76D1\u89C6\u300D\u751F\u6548\u3002")
+                    : T("\u5DF2\u8BBE\u4E3A\uFF1A\u5173\u7A97\u53E3\u5373\u505C\u6B62\u76D1\u89C6\u3002\u4E0B\u6B21\u70B9\u300C\u5F00\u5173\u76D1\u89C6\u300D\u751F\u6548\u3002"));
+            };
+            actions.Controls.Add(keepBox);
 
             // Short labels, and a tooltip carrying the full wording.
             //
@@ -1013,6 +1045,39 @@ namespace GuardianGui
         // Chinese strings stay in one place so the ASCII rule above still holds.
         private static string T(string s) { return s; }
 
+        // ---- settings ----------------------------------------------------------
+        // One user-visible setting, stored next to the rest of the state.
+        //
+        // Kept as its own small file rather than folded into mode.json: mode.json is the
+        // arm/pause state that the watcher reads on every round, and mixing a user
+        // preference into it would make "paused" and "prefers X" the same field.
+        private bool KeepWatchingAfterClose
+        {
+            get
+            {
+                try
+                {
+                    string p = Path.Combine(DataDir, "gui-settings.json");
+                    if (!File.Exists(p)) { return false; }
+                    string s = File.ReadAllText(p);
+                    return s.IndexOf("\"keepWatchingAfterClose\":true", StringComparison.OrdinalIgnoreCase) >= 0;
+                }
+                catch { return false; }
+            }
+            set
+            {
+                try
+                {
+                    Directory.CreateDirectory(DataDir);
+                    File.WriteAllText(Path.Combine(DataDir, "gui-settings.json"),
+                        "{\"keepWatchingAfterClose\":" + (value ? "true" : "false") + "}",
+                        new UTF8Encoding(false));
+                    ClickLog("setting keepWatchingAfterClose=" + value);
+                }
+                catch { }
+            }
+        }
+
         // ---- state ------------------------------------------------------------
         private bool Armed
         {
@@ -1117,7 +1182,11 @@ namespace GuardianGui
             }
             else if (pid > 0)
             {
-                statusLine.Text += T("   \u2014\u2014 \u5173\u6389\u672C\u7A97\u53E3\u5373\u505C\u6B62");
+                // The suffix states the behaviour that is actually in force, which now
+                // depends on the setting rather than being fixed.
+                statusLine.Text += KeepWatchingAfterClose
+                    ? T("   \u2014\u2014 \u5173\u7A97\u540E\u7EE7\u7EED\u76D1\u89C6")
+                    : T("   \u2014\u2014 \u5173\u6389\u672C\u7A97\u53E3\u5373\u505C\u6B62");
             }
 
             string detail = T("\u4E0A\u6B21\u68C0\u67E5\uFF1A") + LastCheck();
@@ -1180,9 +1249,20 @@ namespace GuardianGui
             {
                 ProcessStartInfo psi = new ProcessStartInfo();
                 psi.FileName = PsExe;
+                // -ParentPid ties the watcher's life to this window: when the process
+                // exits the watcher stops (dsh-watchdog.ps1 -> 'launcher closed'). That
+                // is the default because it is what makes "nothing keeps running behind
+                // your back" true.
+                //
+                // The binding is omitted when the user has turned on
+                // 「关闭窗口后继续监视」. Then the window really is just a window: the
+                // watcher keeps its own life and is stopped from the界面 or from
+                // data\mode.json. The tradeoff is stated on the setting itself rather
+                // than hidden, because the two behaviours cannot both be true.
                 psi.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""
                     + WatchdogPath + "\" -DataDir \"" + DataDir + "\" -Silent -AutoRollback -Resident"
-                    + " -Mode auto -ParentPid " + Process.GetCurrentProcess().Id;
+                    + " -Mode auto"
+                    + (KeepWatchingAfterClose ? "" : " -ParentPid " + Process.GetCurrentProcess().Id);
                 psi.UseShellExecute = false;
                 psi.CreateNoWindow = true;
                 psi.WindowStyle = ProcessWindowStyle.Hidden;
@@ -1513,14 +1593,21 @@ namespace GuardianGui
             // fact stopped. For a tool whose entire purpose is to be watching when a plugin
             // breaks DSH, that is the worst possible outcome.
             //
-            // The parent binding is deliberate: it is what makes "nothing keeps running
-            // behind your back" true. So the dialog now states the real behaviour instead
-            // of promising its opposite.
+            // The parent binding is what makes "nothing keeps running behind your back"
+            // true -- and it is now optional, so the dialog has to say which of the two
+            // behaviours the user actually chose.
+            //
+            // Either way the reply closes the window: with the binding in force the
+            // watcher stops by itself, and without it Disarm() is what stops it. Asking
+            // "stop watching, or keep watching?" here would be a second, hidden copy of
+            // the setting.
             string msg = T("\u76D1\u89C6\u6B63\u5728\u8FD0\u884C") + who + T("\u3002") + Environment.NewLine
                 + Environment.NewLine
-                + T("\u9000\u51FA\u4F1A\u540C\u65F6\u505C\u6B62\u76D1\u89C6\uFF1A\u76D1\u89C6\u5668\u7ED1\u5B9A\u5728\u672C\u7A97\u53E3\u4E0A\uFF0C\u7A97\u53E3\u5173\u95ED\u5B83\u5C31\u9000\u51FA\u3002")
-                + Environment.NewLine
-                + T("\u60F3\u7EE7\u7EED\u76D1\u89C6\u5C31\u522B\u5173\u7A97\u53E3\u3002")
+                + (KeepWatchingAfterClose
+                    ? T("\u4F60\u5F00\u4E86\u300C\u5173\u7A97\u540E\u7EE7\u7EED\u76D1\u89C6\u300D\uFF1A\u5173\u6389\u672C\u7A97\u53E3\u540E\u76D1\u89C6\u5668\u4F1A\u7EE7\u7EED\u8DD1\uFF0C\u76D1\u89C6\u4E0D\u4F1A\u505C\u3002") + Environment.NewLine
+                        + T("\u60F3\u505C\u5C31\u91CD\u65B0\u6253\u5F00\u672C\u7A97\u53E3\u70B9\u300C\u5F00\u5173\u76D1\u89C6\u300D\u3002")
+                    : T("\u5173\u6389\u672C\u7A97\u53E3\u4F1A\u540C\u65F6\u505C\u6B62\u76D1\u89C6\uFF1A\u76D1\u89C6\u5668\u7ED1\u5B9A\u5728\u672C\u7A97\u53E3\u4E0A\u3002") + Environment.NewLine
+                        + T("\u60F3\u5173\u7A97\u540E\u7EE7\u7EED\u76D1\u89C6\uFF0C\u5148\u52FE\u4E0A\u300C\u5173\u7A97\u540E\u7EE7\u7EED\u76D1\u89C6\u300D\u3002"))
                 + Environment.NewLine + Environment.NewLine
                 + T("\u786E\u5B9A\u9000\u51FA\uFF1F");
             DialogResult r = MessageBox.Show(msg, T("\u9000\u51FA DSH Guardian"),
