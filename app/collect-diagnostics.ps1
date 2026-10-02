@@ -68,6 +68,7 @@ $ZH = @{
   L_bundles = 'e5b7b2e8a385e68f92e4bbb62f62756e646c6573'
   L_pkgbad = '7061636b6167652e6a736f6e20e8afbbe58f96e5a4b1e8b4a5'
   L_port = 'e7abafe58fa3e68ea2e6b58befbc88e58faae8afbbefbc89'
+  L_portauto = 'e58099e98089e7abafe58fa3efbc88e887aae58aa8e68ea2e6b58befbc89'
   L_listen = 'e59ca8e79b91e590acefbc8844534820e6b4bbe79d80efbc89'
   L_nolisten = 'e6b2a1e69c89e4babae59ca8e79b91e590ac'
   L_logs = '342e20e697a5e5bf97efbc88e69cabe5b0bee983a8e58886efbc89'
@@ -295,17 +296,67 @@ if (Test-Path -LiteralPath $profileDir) {
 
 Add-Line ''
 Add-Line ('--- ' + (T 'L_port') + ' ---')
-foreach ($port in @(19387, 3080)) {
+
+# Auto-detected, so the report stays useful when DSH runs on a non-default port.
+# Same source order as the watchdog: live process, cached data\port.txt, then
+# the two known defaults.
+function Get-DiagListeningPort {
+    $pids = @()
+    try {
+        $rows = Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+            $_.Name -like '*DeepSeek Harness*' -or $_.CommandLine -like '*dsh*'
+        }
+        if ($rows) { $pids = @($rows | ForEach-Object { $_.ProcessId }) }
+    } catch { }
+    if ($pids.Count -eq 0) {
+        try { $pids = @(Get-Process -Name 'DeepSeek Harness' -ErrorAction Stop | ForEach-Object { $_.Id }) } catch { }
+    }
+    if ($pids.Count -eq 0) { return 0 }
+    try {
+        $conns = Get-NetTCPConnection -State Listen -ErrorAction Stop |
+            Where-Object { $pids -contains $_.OwningProcess }
+        if ($conns) { return [int](($conns | Measure-Object -Property LocalPort -Minimum).Minimum) }
+    } catch { }
+    return 0
+}
+
+$cachedPort = 0
+$cacheFile = Join-Path $DataDir 'port.txt'
+if (Test-Path -LiteralPath $cacheFile) {
+    try {
+        [void][int]::TryParse((Get-Content -LiteralPath $cacheFile -Raw).Trim(), [ref]$cachedPort)
+    } catch { }
+}
+
+$candidates = @()
+$seenPorts = @()
+foreach ($src in @(
+        @{ Port = (Get-DiagListeningPort); Src = 'live-process' },
+        @{ Port = $cachedPort; Src = 'cached' },
+        @{ Port = 3080; Src = 'default' },
+        @{ Port = 19387; Src = 'default' })) {
+    # First writer wins, so a detected port keeps its real source label. Do NOT
+    # deduplicate with Sort-Object -Unique: it drops the earlier entry and the
+    # report then claims a live port came from 'default'.
+    if ($src.Port -gt 0 -and $seenPorts -notcontains $src.Port) {
+        $seenPorts += $src.Port
+        $candidates += [pscustomobject]@{ Port = $src.Port; Src = $src.Src }
+    }
+}
+
+Add-Line ('    ' + (T 'L_portauto'))
+foreach ($cand in $candidates) {
+    $port = $cand.Port
     $c = New-Object System.Net.Sockets.TcpClient
     try {
         $iar = $c.BeginConnect('127.0.0.1', $port, $null, $null)
         if ($iar.AsyncWaitHandle.WaitOne(1000, $false)) {
             $c.EndConnect($iar)
-            Add-Line ('    127.0.0.1:' + $port + ' ' + (T 'L_listen'))
+            Add-Line ('    127.0.0.1:' + $port + ' ' + (T 'L_listen') + '  [' + $cand.Src + ']')
         } else {
-            Add-Line ('    127.0.0.1:' + $port + ' ' + (T 'L_nolisten'))
+            Add-Line ('    127.0.0.1:' + $port + ' ' + (T 'L_nolisten') + '  [' + $cand.Src + ']')
         }
-    } catch { Add-Line ('    127.0.0.1:' + $port + ' ' + (T 'L_nolisten')) }
+    } catch { Add-Line ('    127.0.0.1:' + $port + ' ' + (T 'L_nolisten') + '  [' + $cand.Src + ']') }
     finally { $c.Close() }
 }
 
