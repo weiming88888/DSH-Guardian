@@ -1496,17 +1496,29 @@ namespace GuardianGui
             }
 
             string who = pid > 0 ? (T("\uFF08\u8FDB\u7A0B ") + pid + T("\uFF09")) : T("\uFF08\u542F\u52A8\u4E2D\uFF09");
+            // This dialog used to offer "keep watching, just close this window" -- which
+            // the implementation cannot honour. The watcher is started with
+            // -ParentPid <this process>, and dsh-watchdog.ps1 exits as soon as that pid is
+            // gone (Test-PidAlive -> 'launcher closed'). A user could pick "yes", watch the
+            // window disappear and believe monitoring was still running, while it had in
+            // fact stopped. For a tool whose entire purpose is to be watching when a plugin
+            // breaks DSH, that is the worst possible outcome.
+            //
+            // The parent binding is deliberate: it is what makes "nothing keeps running
+            // behind your back" true. So the dialog now states the real behaviour instead
+            // of promising its opposite.
             string msg = T("\u76D1\u89C6\u6B63\u5728\u8FD0\u884C") + who + T("\u3002") + Environment.NewLine
                 + Environment.NewLine
-                + T("\u9009\u300C\u662F\u300D\uFF1A\u4FDD\u6301\u76D1\u89C6\uFF0C\u53EA\u5173\u6389\u672C\u7A97\u53E3\u3002") + Environment.NewLine
-                + T("\u9009\u300C\u5426\u300D\uFF1A\u5148\u505C\u6B62\u76D1\u89C6\uFF0C\u518D\u9000\u51FA\u3002") + Environment.NewLine
+                + T("\u9000\u51FA\u4F1A\u540C\u65F6\u505C\u6B62\u76D1\u89C6\uFF1A\u76D1\u89C6\u5668\u7ED1\u5B9A\u5728\u672C\u7A97\u53E3\u4E0A\uFF0C\u7A97\u53E3\u5173\u95ED\u5B83\u5C31\u9000\u51FA\u3002")
                 + Environment.NewLine
-                + T("\u9009\u300C\u53D6\u6D88\u300D\uFF1A\u4EC0\u4E48\u90FD\u4E0D\u505A\u3002");
+                + T("\u60F3\u7EE7\u7EED\u76D1\u89C6\u5C31\u522B\u5173\u7A97\u53E3\u3002")
+                + Environment.NewLine + Environment.NewLine
+                + T("\u786E\u5B9A\u9000\u51FA\uFF1F");
             DialogResult r = MessageBox.Show(msg, T("\u9000\u51FA DSH Guardian"),
-                MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
 
-            if (r == DialogResult.Cancel) { return; }
-            if (r == DialogResult.No) { Disarm(); }
+            if (r != DialogResult.Yes) { return; }
+            Disarm();
             Close();
         }
 

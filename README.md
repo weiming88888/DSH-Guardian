@@ -217,8 +217,10 @@ After  installing a plugin : DSH boots fine -> click 打基线 to re-baseline
 That is the whole workflow. The rest of the time there is nothing to do, because
 nothing is running.
 
-> **The watcher is a separate process.** Window open or closed does not matter once
-> armed; click 开关监视 again to stop it. That is expected, not a freeze.
+> **The window *is* the switch.** Window open = watching; window closed = stopped.
+> The watcher is started with `-ParentPid <this window's pid>` and exits by itself
+> when the window closes, so nothing can keep running behind your back. That is
+> expected, not a freeze.
 
 ### What happens when DSH crashes
 
