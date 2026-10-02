@@ -1309,7 +1309,13 @@ namespace GuardianGui
                 psi.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""
                     + WatchdogPath + "\" -DataDir \"" + DataDir + "\" -Silent -AutoRollback -Resident"
                     + " -Mode auto"
-                    + (KeepWatchingAfterClose ? "" : " -ParentPid " + Process.GetCurrentProcess().Id);
+                    + (KeepWatchingAfterClose
+                        ? ""
+                        // The start time goes with the pid: Windows recycles pids, and a
+                        // recycled one makes the binding look alive forever, so the
+                        // watcher outlives the window it was told to follow.
+                        : " -ParentPid " + Process.GetCurrentProcess().Id
+                          + " -ParentStartTicks " + Process.GetCurrentProcess().StartTime.Ticks);
                 // Record what was actually used, so the window can tell the truth about
                 // this watcher even after the setting is changed.
                 WriteLaunchRecord(!KeepWatchingAfterClose);

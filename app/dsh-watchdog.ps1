@@ -91,6 +91,9 @@ param(
     # The launcher's pid. When it exits (the user closes the window) the resident
     # watcher stops too, so nothing keeps running behind the user's back.
     [int]$ParentPid = 0,
+    # The launcher's process start time, in ticks. See Test-ParentAlive: a pid on its
+    # own is not proof that the process we were bound to is still there.
+    [long]$ParentStartTicks = 0,
     [int]$IntervalSeconds = 55,
     [int]$MaxResidentMinutes = 240
 )
@@ -142,6 +145,32 @@ function Test-PidAlive {
     param([int]$ProcessId)
     if ($ProcessId -le 0) { return $false }
     try { return $null -ne (Get-Process -Id $ProcessId -ErrorAction Stop) } catch { return $false }
+}
+
+# Is the process we were bound to still running?
+#
+# Test-PidAlive alone is not enough for the -ParentPid binding. Windows recycles pids,
+# and on a busy machine the launcher's number can be handed to a new process within
+# seconds of the window closing. Get-Process -Id then succeeds and the watcher
+# concludes its parent is alive -- so "closing the window stops monitoring" silently
+# stops being true, and the guard keeps running behind the user's back. That is the
+# one outcome this binding exists to prevent, so the pid is checked together with the
+# start time recorded when the watcher was launched: a recycled pid belongs to a
+# process that started later, which does not match.
+function Test-ParentAlive {
+    param([int]$ProcessId, [long]$StartTicks)
+    if ($ProcessId -le 0) { return $false }
+    try { $p = Get-Process -Id $ProcessId -ErrorAction Stop } catch { return $false }
+    if ($StartTicks -gt 0) {
+        try {
+            # Two seconds of slack: both sides read the same value, so any difference
+            # beyond clock granularity means it is a different process.
+            if ([Math]::Abs($p.StartTime.Ticks - $StartTicks) -gt [TimeSpan]::FromSeconds(2).Ticks) {
+                return $false
+            }
+        } catch { }
+    }
+    return $true
 }
 
 function Get-RunningRuntimePid {
@@ -965,6 +994,16 @@ $lastPortLogged = ''
 do {
 $roundIndex++
 
+# Check the binding at the TOP of the round as well, not only in the nap between
+# rounds. The nap check alone leaves a gap as long as one round: a round can probe,
+# launch DSH and wait out the boot window, and a window closed during that time would
+# not stop the watcher until the round finished. Checking here bounds the delay to the
+# moment the launcher is noticed gone, which is what the binding promises.
+if ($ParentPid -gt 0 -and -not (Test-ParentAlive -ProcessId $ParentPid -StartTicks $ParentStartTicks)) {
+    Write-Log 'resident: exiting (launcher closed)' 'INFO'
+    break
+}
+
 # Re-resolved every round on purpose: DSH may restart on a different port, and
 # an explicit -Port still short-circuits this to a fixed value.
 $resolved = Resolve-DshPort -Explicit $Port -Patterns $ProcessMatch
@@ -1324,7 +1363,7 @@ if (Test-Path -LiteralPath $reportLog) {
     while (((Get-Date) - $woke).TotalSeconds -lt $nap) {
         Start-Sleep -Seconds 3
         if ((Read-Mode) -eq 'paused') { $exitReason = 'disarmed'; break }
-        if ($ParentPid -gt 0 -and -not (Test-PidAlive -ProcessId $ParentPid)) { $exitReason = 'launcher closed'; break }
+        if ($ParentPid -gt 0 -and -not (Test-ParentAlive -ProcessId $ParentPid -StartTicks $ParentStartTicks)) { $exitReason = 'launcher closed'; break }
     }
 
     # Exit conditions, in order of importance:
