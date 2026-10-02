@@ -9,6 +9,73 @@ dependencies and relaunches DSH.
 
 > English · [中文](README.zh-CN.md) · [Detailed Chinese guide](docs/GUIDE-zh.md) · [Technical reference](docs/TECHNICAL.md)
 
+![The menu](docs/menu.png)
+
+---
+
+## Quick start — 3 steps
+
+New to DSH and about to install a plugin? This is the whole workflow.
+
+1. **Install DSH Desktop first, and start it once.** Guardian uses it, and it needs a
+   first baseline to fall back to. Nothing works before that.
+2. **Unzip anywhere permanent and run `app\dsh-guardian.exe`.** No installer, no
+   registry, no desktop shortcut unless you ask for one. Keep the folder — if you
+   delete it, the tool is gone.
+3. **Press `3` once to record a baseline**, then press `4` to arm the watcher
+   **and leave the window open**. Now install your plugin.
+
+Afterwards: DSH boots fine → press `3` again (new baseline) → press `4` to disarm
+→ close the window. That's it.
+
+> **The window is the switch.** Open = watching. Closed = stopped. It is not a
+> freeze. Guardian does not add a scheduled task, does not autostart, and uses
+> zero memory when the window is closed.
+
+### See also
+
+| Question | Key |
+|---|---|
+| DSH crashed — why, and where? | `1` (error log — always start here) |
+| Roll back now, or pick the version to fall back to | `2` |
+| Did it actually catch anything? | Look in `data\console\` — one log per launch |
+
+---
+
+## FAQ for first-time users
+
+**Do I need this if I never install plugins?**
+No. Guardian only protects against a plugin install that stops DSH from booting. If
+you never touch plugins, it does nothing for you.
+
+**Does it work with a command-line DSH install?**
+No — DSH Desktop only. The dependency-repair step calls the app's own bundled
+`pnpm`, which exists only in the desktop installation. See
+[For DSH Desktop](#for-dsh-desktop-the-windows-app) above for the reason.
+
+**What exactly is a "baseline"?**
+A copy of the six DSH configuration files at a moment when DSH was working. One
+press of `3` adds one; older ones are never overwritten. Auto-rollback uses exactly
+one of them — the current target, shown on the 「回退目标」 line.
+
+**What happens if I never press `3`?**
+Guardian refuses to roll back and tells you so. It will not guess. No baseline
+means there is nothing to go back to.
+
+**Will it fight with DSH, or slow it down?**
+No. Nothing is resident: no scheduled task, no autostart, no background process
+when the window is closed. While armed it only does a TCP connect check on an
+interval, and relaunches DSH only after a startup crash loop is *proven* — three
+launches (default) died within 45 s each, or the relaunch budget was exhausted.
+
+**Is it safe to delete?**
+Yes. Delete the folder and nothing is left behind. Your DSH stays as it was —
+except for the configuration a rollback actually restored, which is the point.
+
+**Where does it keep things?**
+Everything under `data\` next to the program: snapshots, logs, crash evidence,
+diagnostic reports. It never reads your sessions or credentials.
+
 ---
 
 ## For DSH Desktop (the Windows app)
