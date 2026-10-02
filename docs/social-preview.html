@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<!--
+  GitHub social preview card (1280x640). Rendered by Chrome headless.
+
+  This is the image GitHub shows when the repository link is shared, so it has to work
+  at a glance and at small size: the name, what the tool does in one line, and the
+  window it produces. The same reasoning as docs/hero.html -- the old card predated
+  the GUI.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; width: 1280px; height: 640px; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+    background: linear-gradient(140deg, #1D4ED8 0%, #2563EB 42%, #3B82F6 100%);
+    color: #FFFFFF;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 0 76px; box-sizing: border-box; position: relative; overflow: hidden;
+  }
+  .glow {
+    position: absolute; width: 720px; height: 720px; border-radius: 50%;
+    right: -230px; top: -260px;
+    background: radial-gradient(circle, rgba(255,255,255,.20) 0%, rgba(255,255,255,0) 68%);
+  }
+  .row { display: flex; align-items: center; gap: 26px; z-index: 1; }
+  .mark {
+    width: 104px; height: 104px; border-radius: 26px; flex: none;
+    background: rgba(255,255,255,.16); border: 2px solid rgba(255,255,255,.34);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .mark svg { width: 66px; height: 66px; stroke: #FFFFFF; stroke-width: 1.9;
+              fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  h1 { font-size: 76px; margin: 0; font-weight: 700; letter-spacing: -1.5px; }
+  .sub { font-size: 25px; margin: 6px 0 0; color: rgba(255,255,255,.88); }
+  .line { font-size: 33px; line-height: 1.5; margin: 40px 0 0; z-index: 1; max-width: 1010px; }
+  .line b { color: #FFFFFF; background: rgba(255,255,255,.20);
+            padding: 2px 12px; border-radius: 9px; font-weight: 600; }
+  .foot { display: flex; gap: 14px; margin-top: 40px; z-index: 1; }
+  .chip {
+    font-size: 19px; padding: 8px 18px; border-radius: 999px;
+    background: rgba(255,255,255,.17); border: 1px solid rgba(255,255,255,.26);
+  }
+</style>
+</head>
+<body>
+  <div class="glow"></div>
+  <div class="row">
+    <div class="mark">
+      <svg viewBox="0 0 24 24">
+        <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+        <path d="m9 12 2 2 4-4" />
+      </svg>
+    </div>
+    <div>
+      <h1>DSH Guardian</h1>
+      <p class="sub">Automatic rollback for DeepSeek Harness Desktop</p>
+    </div>
+  </div>
+  <p class="line">A plugin breaks the boot &mdash; it puts the configuration back,
+     reinstalls the dependencies and relaunches DSH.</p>
+  <div class="foot">
+    <span class="chip">Windows</span>
+    <span class="chip">MIT</span>
+    <span class="chip">No scheduled task</span>
+    <span class="chip">No autostart</span>
+  </div>
+</body>
+</html>

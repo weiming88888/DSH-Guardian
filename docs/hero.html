@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<!--
+  README hero image (1200x420). Rendered by Chrome headless; see docs/ASSETS.md.
+
+  The previous hero was a screenshot of the old console TUI: 94% of its pixels were
+  dark, which is what a black console looks like. The program is a Windows GUI now,
+  so the first image in the README has to show the window people actually get.
+
+  Kept as HTML rather than a hand-edited bitmap so the layout is reproducible and the
+  text can be corrected without a design tool. The only external file it needs is the
+  screenshot next to it.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; width: 1200px; height: 420px; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+    background: linear-gradient(135deg, #F8FAFC 0%, #EEF2F8 55%, #E6ECF6 100%);
+    color: #1C222C;
+    display: flex; align-items: center; gap: 34px;
+    padding: 0 40px; box-sizing: border-box;
+  }
+  .left { width: 478px; flex: none; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .mark {
+    width: 42px; height: 42px; border-radius: 11px;
+    background: linear-gradient(160deg, #3B82F6 0%, #2563EB 55%, #1D4ED8 100%);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .mark svg { width: 27px; height: 27px; stroke: #FFFFFF; stroke-width: 2;
+              fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  h1 { font-size: 43px; margin: 0; letter-spacing: -0.5px; font-weight: 700; }
+  .tag { font-size: 19px; line-height: 1.45; color: #3A4椒; color: #3A4553; margin: 0 0 20px; }
+  .steps { font-size: 15.5px; line-height: 1.9; color: #1C222C; }
+  .steps b { color: #1D4ED8; }
+  .shot {
+    flex: 1; border-radius: 12px; overflow: hidden;
+    box-shadow: 0 14px 34px rgba(23, 43, 77, .22), 0 2px 6px rgba(23, 43, 77, .10);
+    border: 1px solid #D5DDE8; background: #fff; line-height: 0;
+  }
+  .shot img { width: 100%; display: block; }
+  .pill {
+    display: inline-block; margin-top: 18px; padding: 5px 12px; border-radius: 999px;
+    background: #DCE7FB; color: #1D4ED8; font-size: 13.5px; font-weight: 600;
+  }
+</style>
+</head>
+<body>
+  <div class="left">
+    <div class="brand">
+      <div class="mark">
+        <svg viewBox="0 0 24 24">
+          <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+          <path d="m9 12 2 2 4-4" />
+        </svg>
+      </div>
+      <h1>DSH Guardian</h1>
+    </div>
+    <p class="tag">Automatic rollback for DeepSeek Harness <i>Desktop</i>.<br>
+       A plugin breaks the boot &mdash; it puts the config back.</p>
+    <div class="steps">
+      <b>1</b> &nbsp;Click <b>&#25171;&#22522;&#32447;</b> &mdash; record a baseline<br>
+      <b>2</b> &nbsp;Click <b>&#24320;&#20851;&#30417;&#35270;</b> &mdash; start watching<br>
+      <b>3</b> &nbsp;Install the plugin. Broken boot &rarr; rolled back
+    </div>
+    <div class="pill">No scheduled task &middot; no autostart</div>
+  </div>
+  <div class="shot"><img src="main-window.png" alt="DSH Guardian main window"></div>
+</body>
+</html>
