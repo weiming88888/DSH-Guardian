@@ -90,6 +90,92 @@ internal static class Guardian
         catch { }
     }
 
+    // Colour, but only where it is both meaningful and safe.
+    //
+    // Two guards, for two different failures:
+    //  - no console (stdout redirected / piped): Console.ForegroundColor throws
+    //    or silently does nothing, and ANSI escapes would pollute a pipe, so the
+    //    text is written plain.
+    //  - the user's console may predate VT support, so nothing here emits ANSI
+    //    escapes; Console.ForegroundColor goes through the Win32 console API.
+    //
+    // The state colours carry the whole point of the screen: green means
+    // "watched", yellow means "changing", dim means "nothing is running".
+    private static void Say(string text, ConsoleColor color)
+    {
+        bool painted = false;
+        if (HasConsole)
+        {
+            try
+            {
+                bool redirected = false;
+                try { redirected = Console.IsOutputRedirected; } catch { }
+                if (!redirected)
+                {
+                    Console.ForegroundColor = color;
+                    painted = true;
+                }
+            }
+            catch { painted = false; }
+        }
+        try { Say(text); }
+        finally
+        {
+            if (painted)
+            {
+                try { Console.ResetColor(); } catch { }
+            }
+        }
+    }
+
+    private static void SayRule(int width, ConsoleColor color)
+    {
+        Say(new string('-', Math.Max(20, width)), color);
+    }
+
+    // Say() ends the line, which is wrong for the left half of a label/value
+    // pair: the first version used it for both halves and every row came out as
+    // "label" / "value" on two lines.
+    private static void SayPart(string text)
+    {
+        if (HasConsole)
+        {
+            try { Console.Write(text); return; } catch { }
+        }
+        try
+        {
+            string dir = DataDir;
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, "dsh-guardian.out.log"),
+                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + text,
+                Encoding.UTF8);
+        }
+        catch { }
+    }
+
+    // One "label  value" line. The old version right-padded the label and put a
+    // colon before the value, which wrapped as soon as the value was long
+    // ("20261002-230811-post-qc-clean" alone is 28 columns) and left the colon
+    // stranded on its own line. Width is budgeted instead: label 10 + value 60.
+    private static void SayRow(string label, string value, ConsoleColor valueColor)
+    {
+        SayPart("  ");
+        SayPart(label.PadRight(10));
+        Say(value, valueColor);
+    }
+
+    // Snapshot names are long and the tail ("-known-good") is the informative
+    // part, so short strings are kept whole and long ones are trimmed in the
+    // middle rather than being left to wrap.
+    private static string Fit(string text, int max)
+    {
+        if (string.IsNullOrEmpty(text)) { return "(无)"; }
+        if (text.Length <= max) { return text; }
+        int tail = max / 2;
+        int head = max - tail - 3;
+        return text.Substring(0, head) + "..." + text.Substring(text.Length - tail);
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -112,6 +198,20 @@ internal static class Guardian
             }
             catch { }
             try { Console.OutputEncoding = new UTF8Encoding(false); } catch { }
+            // The allocated console comes up about 80 columns wide, while the
+            // longest menu line needs ~76 plus a scrollbar margin -- and every
+            // Chinese glyph takes two of them. Without this the menu wrapped and
+            // scrolled horizontally. Buffer must be widened before the window,
+            // or the window set fails; both are wrapped because a console that
+            // is already larger, or has no scrollback, must not break startup.
+            try
+            {
+                int w = 92;
+                if (Console.BufferWidth < w) { Console.BufferWidth = w; }
+                if (Console.WindowWidth < w) { Console.WindowWidth = w; }
+                if (Console.BufferHeight < 300) { Console.BufferHeight = 300; }
+            }
+            catch { }
         }
         try { Console.Title = "DSH Guardian"; } catch { }
 
@@ -510,34 +610,66 @@ internal static class Guardian
             int runtimePid = LiveRuntimePid();
             string lastCheck = RelativeTime(LastTick());
             string target = ShortName(JVal(Path.Combine(DataDir, "last-known-good.json"), "snapshot"));
-            Console.WriteLine("==========================================================");
-            Console.WriteLine("   DSH Guardian  ·  DSH 崩溃自动回退");
-            Console.WriteLine("==========================================================");
-            Console.WriteLine("   1. 查看错误日志      —— 崩了先看这里，含 DSH 原始报错");
-            Console.WriteLine("   2. 回退 / 切换目标   —— 选一个版本：现在回退，或只作以后的目标");
-            Console.WriteLine("   3. 打基线            —— 把当前状态记为一个“好版本”");
-            Console.WriteLine("   4. 自动检查: " + (armed ? "开" : "关") + "      —— 按此键开关自动回退");
-            Console.WriteLine("   0. 退出");
-            Console.WriteLine("==========================================================");
-            Console.WriteLine();
-            Console.WriteLine("【当前状态】");
-            Console.WriteLine("  监视状态 : " + (armed
-                ? (runtimePid > 0 ? "运行中 —— 关掉本窗口即停止" : "已开启，监视器启动中…")
-                : "未运行 —— 本程序当前不占用任何资源"));
-            Console.WriteLine("  上次检查 : " + lastCheck);
-            Console.WriteLine("  回退目标 : " + target);
-            Console.WriteLine();
-            Console.WriteLine("【简易使用流程】");
-            Console.WriteLine("  装插件之前 : 按 4 打开自动检查（变“开”），并保持本窗口开着");
-            Console.WriteLine("  装完插件后 : DSH 能正常启动 → 按 3 打基线");
-            Console.WriteLine("  平时不用时 : 按 4 关掉，然后关掉本窗口（关掉就完全不运行）");
-            Console.WriteLine();
-            Console.WriteLine("  注意：监视只在“开”且本窗口开着时有效。关掉窗口 = 停止监视。");
-            Console.WriteLine("==========================================================");
-            Console.WriteLine("profile : " + Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".dsh", "profiles", "desktop"));
-            Console.WriteLine("data    : " + DataDir);
-            Console.WriteLine();
+
+            // The one thing this screen must answer at a glance: is anything
+            // watching right now? So the state owns the top line and a colour,
+            // and the menu is the quiet part of the screen.
+            ConsoleColor stateColor;
+            string stateText;
+            if (!armed)
+            {
+                stateColor = ConsoleColor.DarkGray;
+                stateText = "○ 未监视 —— 本程序当前不占用任何资源";
+            }
+            else if (runtimePid > 0)
+            {
+                stateColor = ConsoleColor.Green;
+                stateText = "● 监视中 —— 关掉本窗口即停止";
+            }
+            else
+            {
+                stateColor = ConsoleColor.Yellow;
+                stateText = "◐ 已开启，监视器启动中…";
+            }
+
+            // Width budget: the allocated console is about 80 columns wide, and a
+            // Chinese glyph occupies two of them. The previous revision made
+            // every item two lines and overflowed, so each line is kept inside
+            // 72 columns (36 Chinese glyphs) and rule() stays ASCII: '─' is not
+            // guaranteed to exist in an OEM console font.
+            SayRule(50, ConsoleColor.DarkGray);
+            Say("  DSH Guardian", ConsoleColor.Cyan);
+            Say("   · DSH 崩溃自动回退", ConsoleColor.DarkGray);
+            SayRule(50, ConsoleColor.DarkGray);
+            Say("");
+            Say("  " + stateText, stateColor);
+            Say("");
+            Say("  1  查看错误日志    崩了先看这里，含 DSH 原始报错", ConsoleColor.White);
+            Say("  2  回退 / 切换目标  现在回退，或只设成以后的目标", ConsoleColor.White);
+            Say("  3  打基线          把当前状态记为一个“好版本”", ConsoleColor.White);
+            Say("  4  自动检查        " + (armed ? "开 —— 按 4 关闭" : "关 —— 按 4 打开"),
+                armed ? ConsoleColor.Green : ConsoleColor.DarkGray);
+            Say("  0  退出", ConsoleColor.White);
+            SayRule(50, ConsoleColor.DarkGray);
+            SayRow("上次检查", Fit(lastCheck, 40), ConsoleColor.Gray);
+            SayRow("回退目标", Fit(target, 40), ConsoleColor.Gray);
+            SayRow("监视状态", armed ? "开（关掉本窗口即停止）" : "关（本程序不占用任何资源）",
+                armed ? ConsoleColor.Green : ConsoleColor.DarkGray);
+            Say("");
+            Say("【简易使用流程】", ConsoleColor.DarkGray);
+            Say("  装插件之前 : 按 4 打开自动检查（变“开”），并保持本窗口开着");
+            Say("  装完插件后 : DSH 能正常启动 → 按 3 打基线");
+            Say("  平时不用时 : 按 4 关掉，然后关掉本窗口（关掉就完全不运行）");
+            Say("");
+            Say("  注意：监视只在“开”且本窗口开着时有效。", ConsoleColor.DarkGray);
+            Say("        关掉窗口 = 停止监视。", ConsoleColor.DarkGray);
+            Say("");
+            Say("  profile : " + Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".dsh", "profiles", "desktop"), ConsoleColor.DarkGray);
+            Say("  data    : " + DataDir, ConsoleColor.DarkGray);
+            Say("");
+            // Plain Write, not Say(..., color): the reset after a coloured
+            // write would strip the colour from whatever the user types next.
             Console.Write("请选择: ");
 
             string c = (Console.ReadLine() ?? "").Trim().ToLowerInvariant();
