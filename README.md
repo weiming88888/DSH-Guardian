@@ -9,9 +9,9 @@ dependencies and relaunches DSH.
 
 > English · [中文](README.zh-CN.md) · [Detailed Chinese guide](docs/GUIDE-zh.md) · [Technical reference](docs/TECHNICAL.md)
 
-![DSH Guardian: press 3 before installing a plugin, and it rolls back automatically if the plugin breaks DSH](docs/hero.png)
+![DSH Guardian: click 打基线 before installing a plugin, and it rolls back automatically if the plugin breaks DSH](docs/hero.png)
 
-**Windows** · **DeepSeek Harness Desktop** · **MIT** · **No scheduled task, no autostart, zero resident**
+**Windows** · **DeepSeek Harness Desktop** · **MIT** · **No scheduled task, no autostart**
 
 ---
 
@@ -24,17 +24,24 @@ New to DSH and about to install a plugin? This is the whole workflow.
 2. **Unzip anywhere permanent and run `app\dsh-guardian.exe`.** No installer, no
    registry, no desktop shortcut unless you ask for one. Keep the folder — if you
    delete it, the tool is gone.
-3. **Press `3` once to record a baseline**, then press `4` to arm the watcher
-   **and leave the window open**. Now install your plugin.
+3. **Click 打基线 to record a baseline, then 开关监视 to arm the watcher and leave the
+   window open.** Now install your plugin.
 
-Afterwards: DSH boots fine → press `3` again (new baseline) → press `4` to disarm
-→ close the window. That's it.
+Afterwards: DSH boots fine → click 打基线 again (new baseline) → click 开关监视 to
+disarm → close the window. That's it.
 
-![The menu](docs/menu.png)
+![The main window](docs/main-window.png)
 
-> **The window is the switch.** Open = watching. Closed = stopped. It is not a
-> freeze. Guardian does not add a scheduled task, does not autostart, and uses
-> zero memory when the window is closed.
+> **The watcher is a separate process.** Once armed you may close the window and it
+> keeps working; click 开关监视 again to stop it. Guardian does not add a scheduled
+> task and does not autostart.
+
+| To find out | Click |
+|---|---|
+| Why DSH crashed, and where | 日志 (the error log — **always look here first**) |
+| Roll back now, or pick a future target | 回退 |
+| Whether it is actually catching anything | `data\console\`, one log per launch |
+| Need to hand over evidence | the 「DSH Guardian 诊断」 desktop shortcut |
 
 ### See also
 
@@ -62,7 +69,7 @@ A copy of the six DSH configuration files at a moment when DSH was working. One
 press of `3` adds one; older ones are never overwritten. Auto-rollback uses exactly
 one of them — the current target, shown on the 「回退目标」 line.
 
-**What happens if I never press `3`?**
+**What happens if I never click 打基线?**
 Guardian refuses to roll back and tells you so. It will not guess. No baseline
 means there is nothing to go back to.
 
@@ -142,31 +149,35 @@ This is a hard design rule, not an aspiration:
 | Scheduled task | **none** |
 | Autostart / Run key | **none** |
 | Resident process when idle | **none, zero memory** |
-| Started by | opening it, and only when you press `4` |
-| Stopped by | closing that window |
+| Started by | opening it, and only when you click 开关监视 |
+| Stopped by | clicking 开关监视 again, or closing the window |
 
 The watcher is launched with `-Resident -ParentPid <launcher pid>` and exits by
 itself when that process disappears, so it cannot outlive the window that asked
 for it.
 
-## The menu
+## The window
+
+The program is a Windows GUI, not a console menu. Eight buttons, one row:
 
 ```
-==========================================================
-   DSH Guardian  ·  DSH crash auto-rollback
-==========================================================
-   1. 查看错误日志      —— error log; start here after a crash
-   2. 回退 / 切换目标   —— pick a version: roll back now, or just set the target
-   3. 打基线            —— record the current state as a good version
-   4. 自动检查: 关      —— toggles watching on / off
-   0. 退出
-==========================================================
-
-【当前状态】
-  监视状态 : 未运行 —— not watching; nothing is running
-  上次检查 : 4 分钟前
-  回退目标 : 20260930-124301-known-good
+当前状态   ● 监视中 · 上次检查 4 分钟前 · 回退目标 20260930-124301-known-good
+操作       打基线 | 开关监视 | 回退 | 日志 | 目录 | 刷新 | 放大结果 | 退出
+执行结果   (command output, scrolls, resizable)
 ```
+
+| Button | What it does |
+|---|---|
+| 打基线 | record the current state as a good version |
+| 开关监视 | toggle watching on / off |
+| 回退 | pick a version: roll back now, or just set the target |
+| 日志 | the error log — **start here after a crash** |
+| 目录 | browse `data\`: snapshots, logs, reports |
+| 刷新 | re-read the state files |
+| 放大结果 | hide the top zones so the output gets the whole window |
+| 退出 | close (it asks what to do about the watcher first) |
+
+![The main window](docs/main-window.png)
 
 (The UI itself is Chinese; this is a translation of the labels.)
 
@@ -188,7 +199,7 @@ for it.
    somewhere permanent, e.g. `D:\DS\`.
 2. Double-click `app\dsh-guardian.exe`. A Chinese menu opens in a console
    window.
-3. Press `3` once to record the current working state as your first baseline.
+3. Click 打基线 once to record the current working state as your first baseline.
 
 There is no installer, no registry write and **no shortcut is created for you** -
 the program never touches your desktop on its own. If you want one, run
@@ -198,18 +209,16 @@ completely.
 ## Use
 
 ```
-Before installing a plugin : open it, press 4 to arm, KEEP THE WINDOW OPEN
-After  installing a plugin : DSH boots fine -> press any key for the menu
-                             -> press 3 to re-baseline
-                             -> press 4 to disarm -> close the window
+Before installing a plugin : open it, click 开关监视, KEEP THE WINDOW OPEN
+After  installing a plugin : DSH boots fine -> click 打基线 to re-baseline
+                             -> click 开关监视 to disarm -> close the window
 ```
 
 That is the whole workflow. The rest of the time there is nothing to do, because
 nothing is running.
 
-> **The window *is* the switch.** Window open = watching; window closed = stopped.
-> After pressing `4` the window sits in a "watching" state. That is expected, not
-> a freeze.
+> **The watcher is a separate process.** Window open or closed does not matter once
+> armed; click 开关监视 again to stop it. That is expected, not a freeze.
 
 ### What happens when DSH crashes
 
