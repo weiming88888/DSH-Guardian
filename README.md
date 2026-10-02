@@ -9,7 +9,9 @@ dependencies and relaunches DSH.
 
 > English · [中文](README.zh-CN.md) · [Detailed Chinese guide](docs/GUIDE-zh.md) · [Technical reference](docs/TECHNICAL.md)
 
-![The menu](docs/menu.png)
+![DSH Guardian: press 3 before installing a plugin, and it rolls back automatically if the plugin breaks DSH](docs/hero.png)
+
+**Windows** · **DeepSeek Harness Desktop** · **MIT** · **No scheduled task, no autostart, zero resident**
 
 ---
 
