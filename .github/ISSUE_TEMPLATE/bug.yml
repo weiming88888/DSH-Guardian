@@ -1,0 +1,67 @@
+name: 报告问题 / Bug report
+description: DSH 起不来了、回退没成功、或者工具本身报错
+title: "[Bug] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请先看置顶的「新用户先看这里」，很多问题那里已经答过。
+
+        最重要的一步：**先跑一次诊断**，它会生成一份不含密码/密钥的报告，
+        贴上来能省掉一半的来回问。
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: 现在是什么症状
+      options:
+        - DSH 装完插件后起不来（界面不出现 / 一闪而过）
+        - DSH 能起来，但每次重启都很慢或反复崩
+        - 自动检查开着，但崩溃后没有自动回退
+        - 回退执行了，但 DSH 还是起不来
+        - 工具本身报错 / 菜单打不开
+        - 其他（在下面说明）
+    validations:
+      required: true
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DSH 版本
+      description: 桌面版关于页面里的版本号
+      placeholder: 例如 0.2.0
+    validations:
+      required: true
+  - type: input
+    id: guardian-version
+    attributes:
+      label: DSH Guardian 版本
+      description: 解压出来的文件夹名，或菜单上显示的版本
+      placeholder: 例如 1.0.15
+    validations:
+      required: true
+  - type: textarea
+    id: plugins
+    attributes:
+      label: 崩溃前装了什么插件
+      description: 包名或来源链接；不确定就写"刚装的那一个"和它的名字
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: 诊断报告内容
+      description: 双击桌面「DSH Guardian 诊断」生成的报告，整个文件贴进来。不含密码与密钥。
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开 dsh-guardian.exe
+        2. 按 3 打基线，按 4 打开自动检查
+        3. 装插件 xxx
+        4. 重启 DSH，出现 ...
+    validations:
+      required: false
