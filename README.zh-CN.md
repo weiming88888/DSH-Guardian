@@ -147,7 +147,7 @@ https://github.com/weiming88888/DSH-Guardian/releases/latest
 https://github.com/weiming88888/DSH-Guardian/archive/refs/heads/main.zip
 ```
 
-解压后会得到一个 `DSH-Guardian-1.0.12\` 文件夹，把它放到任意固定位置（例如 `D:\DS\`），最终路径形如 `D:\DS\DSH-Guardian-1.0.12\`。
+解压后会得到一个 `DSH-Guardian-1.0.13\` 文件夹，把它放到任意固定位置（例如 `D:\DS\`），最终路径形如 `D:\DS\DSH-Guardian-1.0.13\`。
 
 ### 2. 运行
 
@@ -254,7 +254,7 @@ https://github.com/weiming88888/DSH-Guardian/archive/refs/heads/main.zip
 
 | 参数 | 默认值 | 含义 |
 |---|---|---|
-| `-Port` | **19387** | 探测端口（DSH 自身默认是 3080） |
+| `-Port` | **0（自动）** | 探测端口。`0`＝自动识别 DSH 实际监听的端口；填数字＝固定用它 |
 | `-ProbeTimeoutMs` | 3000 | TCP 探测超时 |
 | `-StartGraceSeconds` | 45 | 启动后多久算"活下来" |
 | `-BootWindowSeconds` | 90 | 允许 DSH 绑定端口的时间 |
@@ -293,7 +293,7 @@ cd app
 
 ## 重要限制
 
-- **端口写死为 19387。** DSH 自己的默认端口是 3080。**端口不一致会让它误判成崩溃并反复重启**，打开自动检查前请先确认。
+- **端口自动识别，不用你填。** 探测的是 DSH 进程**实际在监听**的那个端口。DSH 自身默认 3080，但真正用的端口是在本工具无权读取的地方设置的，所以"假设一个端口"会让它把没崩的 DSH 判成崩溃、再去"救"一个好好的 DSH。识别顺序：`-Port`（你指定了就用它）→ 进程当前监听的端口 → `data\port.txt` 里上次成功识别的缓存（崩溃后 DSH 已经不在了，靠这个续上）→ 3080。
 - **监视只在窗口开着时有效。** 这是"平时不运行"的必然代价，两者不可兼得。
 - **探测方式是 TCP 连接**（默认 3 秒超时），不是 HTTP 请求。所以它只能判断"端口是否响应"，**看不出进程内部的偶发错误**。
 - 只动这 6 个配置文件：`package.json`、`pnpm-lock.yaml`、`cordis.patch.yml`、`cordis.yml`、`pnpm-workspace.yaml`、`compatibility.json`。**不碰**你的会话记录和凭据，也不删 `node_modules`（只按恢复后的版本重新对齐）。
