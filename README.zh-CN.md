@@ -6,7 +6,9 @@
 
 > [English](README.md) · 中文 · [完整使用说明](docs/GUIDE-zh.md) · [技术文档](docs/TECHNICAL.md)
 
-![菜单](docs/menu.png)
+![DSH Guardian：装插件前按一下 3，插件把 DSH 搞崩后自动退回去](docs/hero.png)
+
+**Windows** · **DSH 桌面版** · **MIT** · **无计划任务、无自启、零常驻**
 
 ---
 
