@@ -497,22 +497,57 @@ $b=[IO.File]::ReadAllBytes('app\dsh-watchdog.ps1')
 ($b | Where-Object { $_ -gt 127 }).Count
 ```
 
-### 2. `.cmd` 批处理里**不能有中文，且必须用 CRLF 换行**
+### 2. 生成的 `.cmd` / `.vbs` 必须按"读取方认的编码"来写
 
-`cmd.exe` 按 OEM 代码页解码批处理文件，跟 `.ps1` 的规则不同，**没有 BOM 可救**：
+注意：规则**不是**"生成的脚本里不能有中文"，也不是"必须纯 ASCII"。早先按这个理解
+写代码，造成过一个**静默失效**的 bug，而且同一个坑踩了两次——重启路径会生成两个
+文件，两个都带着 `data\` 的路径：
 
-- 有中文 → 字节被解码成乱码，**会把命令名拼坏**，报"不是内部或外部命令"
-- 用 LF 换行 → cmd.exe 可能**把多行读成一行**，把单词从中间劈开
+启动包装 `.cmd` 和隐藏启动器 `.vbs`。如果程序放在中文目录下（例如 `D:\DS\崩溃回退\`），
+用 `-Encoding ascii` 写文件时所有中文会变成 `?`，于是：
 
-**本项目的做法**：`launch-diagnostics.cmd` 保持**纯 ASCII + CRLF**，
-中文文件名（快捷方式）放在桌面，用户看不到 ASCII 名字。
+```
+.cmd  -> cmd.exe 真的去写 D:\DS\????\data\console\console-<时间戳>.log
+.vbs  -> wscript.exe 直接报"系统找不到指定的路径"
+```
+
+真正的 `data\console\` 一直是空的——而那恰恰是崩溃证据（stderr）该落的地方。
+整个过程不报任何错，因为那个写歪的日志确实写成功了。
+
+实测结论（这也是为什么编码要**运行时判断**、不能写死）：
+
+| 控制台代码页 | ANSI，无 BOM | 带 BOM 的 UTF-8 |
+|---|---|---|
+| 936（中文 Windows 默认） | **可用** | 失败（BOM 被当成命令名的一部分） |
+| 65001（UTF-8） | 失败（GBK 字节不是合法 UTF-8） | **可用** |
+
+所以每个生成文件都用**它自己的读取方**认的编码：
+
+| 文件 | 读取方 | 写法 |
+|---|---|---|
+| `launch-captured-*.cmd`、`post-rollback-install-*.cmd` | `cmd.exe` | 控制台代码页（`Get-CmdEncoding` 判断：ANSI，或 65001 下的 UTF-8+BOM） |
+| `launch-captured-*.vbs` | `wscript.exe` | **UTF-16 LE + BOM**（无论代码页是什么都认） |
+| `mode.json`、`state.json`、`*.jsonl`、诊断报告 | PowerShell / 主程序 | UTF-8（一直没问题） |
+| `runtime.pid` | PowerShell | ASCII（只有数字） |
+
+另外包装脚本用 `cmd.exe /d` 启动，避免 AutoRun 命令偷偷改掉代码页；
+两个生成点现在遇到含 `?` 的路径都会**直接拒绝**，而不是生成一个指向别处的脚本。
+
+**一句话原则：凡是"生成出来给别的程序读"的文件，必须按读取方使用的编码来写，
+并且用读回的方式验证。**
 
 验证：
 
 ```powershell
+# 1. 编码正确、路径没被破坏（输出里不应有任何 '?'）
+Get-Content 'data\launch-captured-*.cmd' -Encoding Default
+# 2. `app\launch-diagnostics.cmd` 保持纯 ASCII + CRLF：
 $b=[IO.File]::ReadAllBytes('app\launch-diagnostics.cmd')
 ($b | Where-Object { $_ -gt 127 }).Count   # 必须是 0
 ```
+
+两个生成包装脚本的地方（`Start-DshCaptured` 与回退后的安装步骤）现在都会在
+路径含 `?` 时**直接拒绝**，而不是生成一个指向别处的脚本。
 
 ### 3. `Guardian.exe.cs` 和 `.md` 文件**没有这个限制**
 
