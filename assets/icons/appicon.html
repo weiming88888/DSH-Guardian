@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<!--
+  Renders the application icon. Not part of the shipped program: it exists so the
+  .ico has a reproducible source instead of being an unexplained binary, and so the
+  icon can be regenerated at any size without a design tool.
+
+  Rendered by Chrome headless at 256x256; see assets/icons/SOURCE.md.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; width: 256px; height: 256px; background: transparent; }
+  .icon {
+    width: 256px; height: 256px;
+    /* Brand accent, same blue as Theme.Accent in Guardian.Win.cs */
+    background: linear-gradient(160deg, #3B82F6 0%, #2563EB 55%, #1D4ED8 100%);
+    border-radius: 56px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .icon svg { width: 168px; height: 168px; stroke: #FFFFFF; stroke-width: 1.9; }
+</style>
+</head>
+<body>
+  <div class="icon">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+      <path d="m9 12 2 2 4-4" />
+    </svg>
+  </div>
+</body>
+</html>

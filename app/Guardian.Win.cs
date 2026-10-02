@@ -1184,9 +1184,16 @@ namespace GuardianGui
             {
                 // The suffix states the behaviour that is actually in force, which now
                 // depends on the setting rather than being fixed.
-                statusLine.Text += KeepWatchingAfterClose
-                    ? T("   \u2014\u2014 \u5173\u7A97\u540E\u7EE7\u7EED\u76D1\u89C6")
-                    : T("   \u2014\u2014 \u5173\u6389\u672C\u7A97\u53E3\u5373\u505C\u6B62");
+                // Read the RUNNING watcher's binding, not the setting: they diverge as
+                // soon as the checkbox is toggled while monitoring. When they disagree,
+                // say so instead of silently describing the wrong one.
+                statusLine.Text += WatcherIsParentBound
+                    ? T("   \u2014\u2014 \u5173\u6389\u672C\u7A97\u53E3\u5373\u505C\u6B62")
+                    : T("   \u2014\u2014 \u5173\u7A97\u540E\u7EE7\u7EED\u76D1\u89C6");
+                if (WatcherIsParentBound == KeepWatchingAfterClose)
+                {
+                    statusLine.Text += T("\uFF08\u8BBE\u7F6E\u5DF2\u6539\uFF0C\u4E0B\u6B21\u70B9\u300C\u5F00\u5173\u76D1\u89C6\u300D\u751F\u6548\uFF09");
+                }
             }
 
             string detail = T("\u4E0A\u6B21\u68C0\u67E5\uFF1A") + LastCheck();
@@ -1211,6 +1218,46 @@ namespace GuardianGui
                 Theme.Style(detailLine, Theme.Muted, 9.75F, FontStyle.Regular);
             }
             detailLine.Text = detail;
+        }
+
+        // ---- the running watcher's actual binding ------------------------------
+        // The setting says what the NEXT arm will do. It does not describe the watcher
+        // that is running right now, and those two can differ: the setting is read at
+        // arm time and the watcher keeps the binding it was started with.
+        //
+        // Reported as "关窗即停功能无法实现": the checkbox showed 关窗即停 while the
+        // running watcher had in fact been started without -ParentPid, so closing the
+        // window left it running. The label was reading the setting, not the process.
+        //
+        // So the binding is written down when the watcher is launched, and every label
+        // that talks about closing the window reads this instead.
+        private string LaunchRecordPath { get { return Path.Combine(DataDir, "watcher-launch.json"); } }
+
+        private void WriteLaunchRecord(bool parentBound)
+        {
+            try
+            {
+                Directory.CreateDirectory(DataDir);
+                File.WriteAllText(LaunchRecordPath,
+                    "{\"parentBound\":" + (parentBound ? "true" : "false") + "}",
+                    new UTF8Encoding(false));
+            }
+            catch { }
+        }
+
+        // true = the running watcher is bound to this window (closing stops it).
+        private bool WatcherIsParentBound
+        {
+            get
+            {
+                try
+                {
+                    if (!File.Exists(LaunchRecordPath)) { return true; }   // older launches were always bound
+                    string s = File.ReadAllText(LaunchRecordPath);
+                    return s.IndexOf("\"parentBound\":false", StringComparison.OrdinalIgnoreCase) < 0;
+                }
+                catch { return true; }
+            }
         }
 
         // ---- actions ----------------------------------------------------------
@@ -1263,6 +1310,9 @@ namespace GuardianGui
                     + WatchdogPath + "\" -DataDir \"" + DataDir + "\" -Silent -AutoRollback -Resident"
                     + " -Mode auto"
                     + (KeepWatchingAfterClose ? "" : " -ParentPid " + Process.GetCurrentProcess().Id);
+                // Record what was actually used, so the window can tell the truth about
+                // this watcher even after the setting is changed.
+                WriteLaunchRecord(!KeepWatchingAfterClose);
                 psi.UseShellExecute = false;
                 psi.CreateNoWindow = true;
                 psi.WindowStyle = ProcessWindowStyle.Hidden;
@@ -1603,11 +1653,11 @@ namespace GuardianGui
             // the setting.
             string msg = T("\u76D1\u89C6\u6B63\u5728\u8FD0\u884C") + who + T("\u3002") + Environment.NewLine
                 + Environment.NewLine
-                + (KeepWatchingAfterClose
-                    ? T("\u4F60\u5F00\u4E86\u300C\u5173\u7A97\u540E\u7EE7\u7EED\u76D1\u89C6\u300D\uFF1A\u5173\u6389\u672C\u7A97\u53E3\u540E\u76D1\u89C6\u5668\u4F1A\u7EE7\u7EED\u8DD1\uFF0C\u76D1\u89C6\u4E0D\u4F1A\u505C\u3002") + Environment.NewLine
+                + (!WatcherIsParentBound
+                    ? T("\u5F53\u524D\u8FD9\u4E2A\u76D1\u89C6\u5668\u4E0D\u7ED1\u5B9A\u7A97\u53E3\uFF1A\u5173\u6389\u672C\u7A97\u53E3\u540E\u5B83\u4F1A\u7EE7\u7EED\u8DD1\u3002") + Environment.NewLine
                         + T("\u60F3\u505C\u5C31\u91CD\u65B0\u6253\u5F00\u672C\u7A97\u53E3\u70B9\u300C\u5F00\u5173\u76D1\u89C6\u300D\u3002")
                     : T("\u5173\u6389\u672C\u7A97\u53E3\u4F1A\u540C\u65F6\u505C\u6B62\u76D1\u89C6\uFF1A\u76D1\u89C6\u5668\u7ED1\u5B9A\u5728\u672C\u7A97\u53E3\u4E0A\u3002") + Environment.NewLine
-                        + T("\u60F3\u5173\u7A97\u540E\u7EE7\u7EED\u76D1\u89C6\uFF0C\u5148\u52FE\u4E0A\u300C\u5173\u7A97\u540E\u7EE7\u7EED\u76D1\u89C6\u300D\u3002"))
+                        + T("\u60F3\u5173\u7A97\u540E\u7EE7\u7EED\u76D1\u89C6\uFF0C\u5148\u52FE\u4E0A\u300C\u5173\u7A97\u540E\u7EE7\u7EED\u76D1\u89C6\u300D\u5E76\u91CD\u65B0\u5F00\u5173\u4E00\u6B21\u76D1\u89C6\u3002"))
                 + Environment.NewLine + Environment.NewLine
                 + T("\u786E\u5B9A\u9000\u51FA\uFF1F");
             DialogResult r = MessageBox.Show(msg, T("\u9000\u51FA DSH Guardian"),
