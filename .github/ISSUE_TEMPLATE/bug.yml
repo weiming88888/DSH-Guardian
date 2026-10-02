@@ -19,7 +19,7 @@ body:
         - DSH 能起来，但每次重启都很慢或反复崩
         - 自动检查开着，但崩溃后没有自动回退
         - 回退执行了，但 DSH 还是起不来
-        - 工具本身报错 / 菜单打不开
+        - 工具本身报错 / 界面打不开
         - 其他（在下面说明）
     validations:
       required: true
@@ -35,8 +35,8 @@ body:
     id: guardian-version
     attributes:
       label: DSH Guardian 版本
-      description: 解压出来的文件夹名，或菜单上显示的版本
-      placeholder: 例如 1.0.15
+      description: 解压出来的文件夹名，或发布包名字里的版本号
+      placeholder: 例如 1.1.0
     validations:
       required: true
   - type: textarea
@@ -50,7 +50,7 @@ body:
     id: report
     attributes:
       label: 诊断报告内容
-      description: 双击桌面「DSH Guardian 诊断」生成的报告，整个文件贴进来。不含密码与密钥。
+      description: 双击桌面「DSH Guardian 诊断」快捷方式，或运行 app\dsh-guardian.exe diagnostics，把生成的报告整个贴进来。不含密码与密钥。
       render: text
     validations:
       required: true
@@ -60,7 +60,7 @@ body:
       label: 复现步骤
       placeholder: |
         1. 打开 dsh-guardian.exe
-        2. 按 3 打基线，按 4 打开自动检查
+        2. 点「打基线」，点「开关监视」
         3. 装插件 xxx
         4. 重启 DSH，出现 ...
     validations:
