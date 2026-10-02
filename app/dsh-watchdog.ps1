@@ -1016,6 +1016,13 @@ if ($alive) {
     $procNote = if ($procsDegraded) { 'unavailable (degraded)' } else { "$($procs.Count)" }
     Write-Log ("DSH starting: {0}s since launch, process count {1}, boot window {2}s" -f $waited, $procNote, $BootWindowSeconds)
     Write-Log ("  (if a healthy boot takes longer than {0}s, raise -BootWindowSeconds; if a failing start takes longer than {1}s to die, raise -StartGraceSeconds)" -f $BootWindowSeconds, $StartGraceSeconds) 'INFO'
+    if ($waited -ge 30) {
+        # Card 1 of the false-crash guard, and the one that surprises people: the
+        # whole boot window has to expire before a launch counts as short-lived,
+        # so a DSH that dies instantly is still reported as "starting" until then.
+        # Say so out loud, once per 30s, rather than looking hung.
+        Write-Log ("Still inside the boot window: no verdict yet. A DSH that fails fast is not counted as short-lived until {0}s have passed; lower -BootWindowSeconds if that wait is too long for you." -f $BootWindowSeconds) 'INFO'
+    }
     Write-Event -Kind 'STARTING' -Fields @{ waitedSeconds = $waited; bootWindowSeconds = $BootWindowSeconds; processCount = $procs.Count }
 } else {
     $state.failStreak = [int]$state.failStreak + 1
