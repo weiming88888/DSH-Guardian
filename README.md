@@ -233,6 +233,15 @@ With the window open and auto-check armed:
 | Rollback did not help | Stops relaunching and says so once, rather than looping |
 | `-MaxAutoRollbacks` (default 2) | Hard cap per crash episode |
 
+**Timing, measured in a sandbox** (this is the part that surprises people): a launch
+is not counted as short-lived until the whole `-BootWindowSeconds` window (default
+90 s) has passed, because a slow-but-fine boot must not be mistaken for a crash.
+So a DSH that dies instantly is still reported as `DSH starting` for that window,
+and auto-rollback needs one round *after* the window to fire. The watcher now logs
+"still inside the boot window: no verdict yet" every 30 s so it never looks hung.
+If that wait is too long for you, lower `-BootWindowSeconds` (e.g. `10`) — it is
+safe as long as your DSH never legitimately takes that long to bind its port.
+
 Every message is deduplicated by signature, so a watcher that runs for hours does
 not drown the log in repeats.
 
