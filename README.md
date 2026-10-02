@@ -361,9 +361,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "app\build.ps1"
 
 ## Notes and limits
 
-- **The DSH port is assumed to be 19387.** DSH's own default is 3080. A mismatched
-  port makes the probe report a crash that is not happening, so verify this before
-  arming.
+- **The DSH port is detected automatically** — it is the port the running DSH
+  process is actually listening on, not a guess. DSH's own default is 3080, but
+  the port really in use is set outside the config files this tool is allowed to
+  read, so assuming one made the probe report a crash that was not happening (and
+  then "recover" a perfectly healthy DSH). Detection order: `-Port` if you pass
+  it, else the live listening port, else the one cached in `data\port.txt` from
+  the last successful detection (this is what carries the watcher across a crash),
+  else 3080. If you pin `-Port`, detection is skipped entirely.
 - The watcher only runs while its window is open. That is the price of "nothing
   runs unless I open it"; the two cannot both be satisfied.
 - The probe is a **TCP connect** to `127.0.0.1:<port>` (default timeout 3 s), not
