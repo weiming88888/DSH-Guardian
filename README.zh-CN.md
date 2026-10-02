@@ -154,7 +154,7 @@ https://github.com/weiming88888/DSH-Guardian/releases/latest
 https://github.com/weiming88888/DSH-Guardian/archive/refs/heads/main.zip
 ```
 
-解压后会得到一个 `DSH-Guardian-1.0.15\` 文件夹，把它放到任意固定位置（例如 `D:\DS\`），最终路径形如 `D:\DS\DSH-Guardian-1.0.15\`。
+解压后会得到一个 `DSH-Guardian-1.0.16\` 文件夹，把它放到任意固定位置（例如 `D:\DS\`），最终路径形如 `D:\DS\DSH-Guardian-1.0.16\`。
 
 ### 2. 运行
 
