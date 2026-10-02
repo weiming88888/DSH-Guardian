@@ -100,7 +100,7 @@ https://github.com/weiming88888/DSH-Guardian/releases/latest
 https://github.com/weiming88888/DSH-Guardian/archive/refs/heads/main.zip
 ```
 
-解压后会得到一个 `DSH-Guardian-1.0.2\` 文件夹，把它放到任意固定位置（例如 `D:\DS\`），最终路径形如 `D:\DS\DSH-Guardian-1.0.2\`。
+解压后会得到一个 `DSH-Guardian-1.0.12\` 文件夹，把它放到任意固定位置（例如 `D:\DS\`），最终路径形如 `D:\DS\DSH-Guardian-1.0.12\`。
 
 ### 2. 运行
 
@@ -279,14 +279,19 @@ docs\
   TECHNICAL.md                      技术文档（英文，给改代码的人）
 
 data\                             运行时数据（不在仓库里）
-  mode.json / state.json / last-tick.json / last-known-good.json
-  watchdog.log / events.jsonl / exe-trace.log
-  child-stderr.log                  子脚本报错（自动回退时排查用）
-  menu-error.log                    菜单出错记录
+  mode.json / state.json / last-tick.json / last-known-good.json / runtime.pid
+  watchdog.log / events.jsonl / exe-trace.log / child-stderr.log / menu-error.log
+  launch-captured-<时间戳>-<pid>.cmd / .vbs   生成的隐藏启动包装脚本
   console\                          每次启动 DSH 捕获的 stdout+stderr
   snapshots\                        各版本快照
   诊断报告\                         诊断报告
+_archive\<日期>-pre-qc\           质检前的本地备份
 ```
+
+发布压缩包里只有 `app\` 和 `docs\` 这两部分。`data\`、`_archive\` 和
+`DSH-Guardian-<版本>.zip` 只存在于工作目录——`data\` 里有你本机的路径和插件清单，
+所以 `.gitignore` 把它排除在外。`data\console\` 只有在真的通过包装脚本启动过一次
+之后才会有文件，正常安装下它是空的。
 
 ## 重新编译
 
@@ -300,6 +305,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "app\build.ps1"
 
 - **[docs/GUIDE-zh.md](docs/GUIDE-zh.md)** —— 完整中文使用说明（含每个细节、常见问题、故障排查）
 - **[docs/TECHNICAL.md](docs/TECHNICAL.md)** —— 英文技术文档（内部原理、两个 Windows 编码陷阱）
+
+## 两个 Windows 编码陷阱
+
+两个都真实消耗过调试时间。完整说明见 [docs/TECHNICAL.md](docs/TECHNICAL.md)、
+[docs/GUIDE-zh.md](docs/GUIDE-zh.md)；简要版：
+
+- **`.ps1` 必须保持纯 ASCII**，除非文件带 UTF-8 BOM。Windows PowerShell 5.1 读取
+  没有 BOM 的脚本时按系统 ANSI 代码页解码，源码里直接写中文会让解析失败。需要输出
+  中文时，用 UTF-8 十六进制存储、运行时解码。
+- **生成的 `.cmd` 和 `.vbs` 必须按各自读取方能识别的编码来写**——**不是** ASCII。
+  重启包装脚本里嵌着你的 `data\` 路径，按 ASCII 写会把 `D:\DS\崩溃回退\data`
+  变成 `D:\DS\????\data`：`cmd.exe` 把日志写到一个没人看的地方，`wscript.exe`
+  直接报"系统找不到指定的路径"，而本该存放崩溃证据的 `data\console\` 一直是空的。
+  所以 `.cmd` 按控制台代码页写（通常是 ANSI；`chcp 65001` 下用带 BOM 的 UTF-8，
+  两种情况都实测过），`.vbs` 写成**带 BOM 的 UTF-16 LE**——WScript 认这个 BOM，
+  跟代码页无关。现在两处生成逻辑在路径含 `?` 时都会**直接拒绝**，而不是生成一个写歪的脚本。
 
 ## 许可
 
