@@ -32,6 +32,9 @@
 
 ## 新手常见问题
 
+**崩溃之后它多久才动手？**
+**默认约 90 秒再加一轮。** 一次启动必须等完整整 `-BootWindowSeconds` 窗口（默认 90 秒）才会被算作"短命启动"——这是为了不把"启动慢但没事"误判成崩溃。所以一个**瞬间就死**的 DSH，在这 90 秒里日志仍然显示 `DSH starting`，自动回退要再等一轮才触发。现在它会每 30 秒写一行"仍在启动窗口内，暂未下结论"，不会看起来像卡住。嫌慢就把 `-BootWindowSeconds` 调小（例如 `10`），前提是你的 DSH 正常情况下不会真的需要那么久才能占住端口。
+
 **我不装插件，需要它吗？**
 不需要。它只防"装插件导致 DSH 起不来"这一种情况。不碰插件的话，它对你没有任何作用。
 
@@ -147,7 +150,7 @@ https://github.com/weiming88888/DSH-Guardian/releases/latest
 https://github.com/weiming88888/DSH-Guardian/archive/refs/heads/main.zip
 ```
 
-解压后会得到一个 `DSH-Guardian-1.0.13\` 文件夹，把它放到任意固定位置（例如 `D:\DS\`），最终路径形如 `D:\DS\DSH-Guardian-1.0.13\`。
+解压后会得到一个 `DSH-Guardian-1.0.14\` 文件夹，把它放到任意固定位置（例如 `D:\DS\`），最终路径形如 `D:\DS\DSH-Guardian-1.0.14\`。
 
 ### 2. 运行
 
