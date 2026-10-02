@@ -1,0 +1,27 @@
+﻿name: 功能建议 / Feature request
+description: 想要的新能力，或现有行为不顺的地方
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请尽量说清"你现在怎么绕过去的"——这通常比需求本身更有用。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你遇到的实际麻烦
+      description: 具体到场景，不要只写"希望支持 X"
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: 你现在怎么绕过它
+    validations:
+      required: false
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你期待的用法
+    validations:
+      required: false
