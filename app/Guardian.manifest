@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DPI awareness, declared to the OS at process start.
+
+  Why this file exists: the program called SetProcessDPIAware() from managed Main,
+  and on this machine that was not honoured. Windows kept the process
+  DPI-virtualised, so a window designed as 1120x470 client opened at roughly
+  761x351 physical with the whole UI bitmap-stretched. A manifest is the mechanism
+  the OS actually applies, and it takes effect before any managed code runs.
+
+  PerMonitorV2 first (Windows 10 1703+), then dpiAware as the fallback, so the
+  process is never virtualised on any supported system.
+
+  Note: XML comments may not contain a double hyphen, which is why this file avoids
+  using two dashes in a row anywhere. An invalid comment here makes the whole
+  manifest invalid and Windows then refuses to start the executable outright.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity version="1.0.0.0" name="DSH.Guardian" type="win32" />
+
+  <!-- Explicit, not implied.
+
+       Without a requestedExecutionLevel the loader has to guess, and Windows then treats
+       the image as a legacy application: installer-detection heuristics apply and the
+       process can be handed a compatibility context. The symptom that led here: the
+       shortcut verb's child PowerShell could not write a .lnk to the Desktop when
+       started BY THIS EXE, while the identical script and arguments succeeded from an
+       ordinary shell, from a shell's child, and two levels deep (shell, cmd,
+       powershell). The restriction followed this process, so the process's own declared
+       identity is the thing to state.
+
+       asInvoker also says plainly that the program never asks for elevation. It is a
+       user-level watchdog and must never raise a UAC prompt. -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+    </windowsSettings>
+  </application>
+
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}" />
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}" />
+    </application>
+  </compatibility>
+</assembly>

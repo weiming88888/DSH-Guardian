@@ -4,7 +4,7 @@
 
 装插件把 DSH 搞崩了？它会自动把配置退回上一个能用的版本、把依赖重新装好、再把 DSH 拉起来。
 
-> [English](README.md) · 中文 · [完整使用说明](docs/GUIDE-zh.md) · [技术文档](docs/TECHNICAL.md)
+> [English](README.md) · 中文 · [完整使用说明](docs/GUIDE-zh.md) · [图形界面说明](docs/GUI.md) · [日志怎么读](docs/LOG.md) · [技术文档](docs/TECHNICAL.md)
 
 ![DSH Guardian：装插件前按一下 3，插件把 DSH 搞崩后自动退回去](docs/hero.png)
 
@@ -17,14 +17,14 @@
 刚用上 DSH、准备装插件？整个流程就这么多：
 
 1. **先装好 DSH 桌面版，并启动过一次。** 本工具依赖它，而且需要先有一个"好版本"可退。
-2. **解压到固定位置，双击 `app\dsh-guardian.exe`。** 没有安装程序、不写注册表、不会自动建快捷方式。文件夹放哪都行，删掉就等于卸载干净。
+2. **解压到固定位置，双击 `app\dsh-guardian.exe`**（图形界面）。没有安装程序、不写注册表、不会自动建快捷方式。详细说明见 [docs/GUI.md](docs/GUI.md)。
 3. **按 `3` 记一个基线，再按 `4` 打开自动检查，窗口保持开着。** 然后去装插件。
 
 装完之后：DSH 能正常启动 → 再按一次 `3`（记新基线）→ 按 `4` 关闭检查 → 关窗口。完事。
 
 ![菜单](docs/menu.png)
 
-> **窗口就是开关。** 开着＝在监视；关掉＝已停止。窗口停在"监视中"不是卡住。关掉窗口后不占任何内存，也没有计划任务、不会开机自启。
+> **监视在独立进程里跑**：打开监视后可以关掉界面，它照常工作；要停止请在界面里选「2 开关监视」。
 
 | 想知道 | 按 |
 |---|---|
@@ -154,7 +154,7 @@ https://github.com/weiming88888/DSH-Guardian/releases/latest
 https://github.com/weiming88888/DSH-Guardian/archive/refs/heads/main.zip
 ```
 
-解压后会得到一个 `DSH-Guardian-1.0.16\` 文件夹，把它放到任意固定位置（例如 `D:\DS\`），最终路径形如 `D:\DS\DSH-Guardian-1.0.16\`。
+解压后会得到一个 `DSH-Guardian-<版本>\` 文件夹，把它放到任意固定位置（例如 `D:\DS\`），最终路径形如 `D:\DS\DSH-Guardian-<版本>\`。
 
 ### 2. 运行
 
@@ -182,7 +182,7 @@ https://github.com/weiming88888/DSH-Guardian/archive/refs/heads/main.zip
 
 **就这些。** 平时什么都不用管，因为它根本不运行。
 
-> **窗口就是开关本身**：窗口开着 = 正在监视；窗口关掉 = 完全停止。
+> **监视在独立进程里跑**：打开监视后可以关掉界面，它照常工作；要停止请在界面里选「2 开关监视」。
 > 按 `4` 之后窗口会停在"监视中"，这是正常的，不是卡住。
 
 ### 五个按键
@@ -271,21 +271,23 @@ https://github.com/weiming88888/DSH-Guardian/archive/refs/heads/main.zip
 | `-IntervalSeconds` | 55 | 监视间隔（仅常驻模式） |
 | `-MaxResidentMinutes` | 240 | 常驻监视最长存活时间 |
 
+图形界面是 `dsh-guardian.exe`；下面这些命令行动词在 **`dsh-guardian-console.exe`** 上。
+
 ## 命令行用法（可选）
 
 ```powershell
 cd app
 
-.\dsh-guardian.exe logs        # 看错误日志
-.\dsh-guardian.exe baseline    # 打基线
-.\dsh-guardian.exe rollback    # 选版本回退（和菜单按 2 完全一样）
-.\dsh-guardian.exe preview     # 只显示回退计划，什么都不改
-.\dsh-guardian.exe arm         # 开始监视（随当前窗口，关窗即停）
-.\dsh-guardian.exe disarm      # 停止监视
-.\dsh-guardian.exe shortcut    # 创建桌面快捷方式（仅手动，不会自动创建）
+.\dsh-guardian-console.exe logs        # 看错误日志
+.\dsh-guardian-console.exe baseline    # 打基线
+.\dsh-guardian-console.exe rollback    # 选版本回退（和菜单按 2 完全一样）
+.\dsh-guardian-console.exe preview     # 只显示回退计划，什么都不改
+.\dsh-guardian-console.exe arm         # 开始监视（随当前窗口，关窗即停）
+.\dsh-guardian-console.exe disarm      # 停止监视
+.\dsh-guardian-console.exe shortcut    # 创建桌面快捷方式（仅手动，不会自动创建）
 ```
 
-`dsh-snapshot.ps1` 还支持 `-Action Create | List | Verify | Restore | Mark-Good | Promote`，
+`dsh-snapshot.ps1` 还支持 `-Action Create | List | Verify | Restore | Mark-Good | Promote | Delete`，
 以及 `-DryRun`、`-Force`。**不加 `-Force` 的 `Restore` 只打印计划，不写盘。**
 
 ## 出问题了怎么反馈
@@ -326,7 +328,7 @@ app\                              程序本体
   collect-diagnostics.ps1           诊断收集
   Guardian.exe.cs                   主程序源码（C#）
   build.ps1                         重新编译
-  dsh-guardian.ico                  图标
+  dsh-guardian-app.ico                  图标
 
 docs\
   GUIDE-zh.md                       详细使用说明（中文，本文件是精简介绍）

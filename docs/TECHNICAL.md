@@ -50,11 +50,11 @@ D:\DS\崩溃回退\
     dsh-guardian.exe               launcher + menu (GUI subsystem, winexe)
     dsh-watchdog.ps1               watcher: probe, decide, roll back
     dsh-snapshot.ps1               snapshots, restore, mark-baseline
-    launch-diagnostics.cmd         diagnostic launcher (ASCII + CRLF)
+    launch-diagnostics.cmd         diagnostic launcher (ASCII + CRLF); the desktop shortcut now runs dsh-guardian.exe diagnostics instead
     collect-diagnostics.ps1        diagnostic collector (ASCII, hex-encoded Chinese)
     Guardian.exe.cs                C# source for the exe
     build.ps1                      rebuild the exe with csc
-    dsh-guardian.ico               icon
+    dsh-guardian-app.ico               icon
   data\                          all runtime state
     mode.json / state.json / last-tick.json / last-known-good.json / runtime.pid
     watchdog.log / events.jsonl / exe-trace.log / dsh-guardian.out.log

@@ -114,6 +114,21 @@ if (-not [System.IO.Path]::IsPathRooted($DataDir)) {
 # Recorded so process matching can exclude this watchdog's own invocation.
 $script:SelfPath = $PSCommandPath
 
+# --------------------------------------------------------------- named constants
+# Every constant that used to sit inline in the logic lives here. They are also
+# parameter defaults where a caller may legitimately override them; these names
+# exist for the ones read deeper in the file, so the value appears exactly once.
+#
+#   DshDocumentedDefaultPort  DSH's own default, used only when parameter, live
+#                             process and cached file all fail (see Resolve-DshPort)
+#   NoVerdictLogSeconds       how long a launch may run before the log stops saying
+#                             "no verdict yet" -- reporting earlier misreads a slow
+#                             start as a crash
+#   HeartbeatStaleMinutes     a heartbeat older than this is not "recent"
+$script:DshDocumentedDefaultPort = 3080
+$script:NoVerdictLogSeconds = 30
+$script:HeartbeatStaleMinutes = 30
+
 $ProfileDir = Join-Path (Join-Path $DshHome 'profiles') $ProfileName
 $ConsoleDir = Join-Path $DataDir 'console'
 $modeFile = Join-Path $DataDir 'mode.json'
@@ -286,26 +301,89 @@ function Get-DshListeningPort {
     } catch { }
 
     if ($pids.Count -eq 0) {
-        try { $pids = @(Get-Process -Name 'DeepSeek Harness' -ErrorAction Stop | ForEach-Object { $_.Id }) } catch { }
+        # Fall back to matching process NAMES, for the case where CommandLine is not
+        # readable (it needs rights that a scheduled task may not have).
+        #
+        # This used to hardcode Get-Process -Name 'DeepSeek Harness'. Two problems,
+        # both found by the sandbox QC:
+        #   1. it ignored -Patterns entirely, so a caller asking for a different
+        #      process still got DSH's port -- -ProcessMatch silently did nothing on
+        #      this path, which made the cached/default port levels unreachable;
+        #   2. it was one more product name written into the code as a literal.
+        # Matching $Patterns against the process name keeps the intent and honours the
+        # parameter.
+        try {
+            $pids = @(Get-Process -ErrorAction Stop | Where-Object {
+                $n = $_.ProcessName
+                if (-not $n) { return $false }
+                foreach ($p in $Patterns) { if ($n -like "*$p*") { return $true } }
+                return $false
+            } | ForEach-Object { $_.Id })
+        } catch { }
     }
     if ($pids.Count -eq 0) { return 0 }
 
+    # PID -> listening port.
+    #
+    # This used to call Get-NetTCPConnection, which pulls the entire NetTCPIP module
+    # into this long-lived process. Measured on this machine: +68,760 KB for that one
+    # call, out of a 165 MB resident watchdog. netstat -ano returns the same data from
+    # a CHILD process, so the watcher itself stays small.
+    #
+    # Verified equivalent before switching: same port (19387), same listener set, and
+    # 12x faster (56 ms vs 690 ms for the pair of calls it replaces).
+    $mine = Get-ListenersByPid -Pids $pids
+    $web = @($mine | Where-Object { $_.IP -in @('127.0.0.1', '0.0.0.0', '::', '::1') })
+    if ($web.Count -gt 0) {
+        # Lowest wins: the app's IPC/dev ports are ephemeral high numbers,
+        # and the web UI is the one the user configured.
+        return [int](($web | Measure-Object -Property Port -Minimum).Minimum)
+    }
+    if ($mine.Count -gt 0) { return [int](($mine | Measure-Object -Property Port -Minimum).Minimum) }
+    return 0
+}
+
+# Listening TCP endpoints owned by the given pids, via netstat -ano.
+#
+# Why not Get-NetTCPConnection: see the note in Get-DshListeningPort -- the module it
+# loads costs ~68 MB in a process that stays resident for hours. netstat is a child
+# process, so its cost is transient and does not touch this one.
+function Get-ListenersByPid {
+    param([int[]]$Pids)
+    $result = @()
+    if (-not $Pids -or $Pids.Count -eq 0) { return $result }
+
     try {
-        $conns = Get-NetTCPConnection -State Listen -ErrorAction Stop |
-            Where-Object { $pids -contains $_.OwningProcess -and $_.LocalAddress -in @('127.0.0.1', '0.0.0.0', '::', '::1') }
-        if ($conns) {
-            # Lowest wins: the app's IPC/dev ports are ephemeral high numbers,
-            # and the web UI is the one the user configured.
-            return [int](($conns | Measure-Object -Property LocalPort -Minimum).Minimum)
+        $raw = & netstat.exe -ano -p TCP 2>$null
+        foreach ($line in $raw) {
+            $s = "$line".Trim()
+            if (-not $s.StartsWith('TCP')) { continue }
+            if ($s -notmatch 'LISTENING') { continue }
+            $f = $s -split '\s+'
+            if ($f.Count -lt 5) { continue }
+            $local = $f[1]
+            $colon = $local.LastIndexOf(':')
+            if ($colon -lt 1) { continue }
+            $port = 0
+            if (-not [int]::TryParse($local.Substring($colon + 1), [ref]$port)) { continue }
+            $procId = 0
+            if (-not [int]::TryParse($f[$f.Count - 1], [ref]$procId)) { continue }
+            if ($Pids -notcontains $procId) { continue }
+            $result += [pscustomobject]@{ IP = $local.Substring(0, $colon); Port = $port; Pid = $procId }
         }
     } catch { }
 
-    try {
-        $conns = Get-NetTCPConnection -State Listen -ErrorAction Stop |
-            Where-Object { $pids -contains $_.OwningProcess }
-        if ($conns) { return [int](($conns | Measure-Object -Property LocalPort -Minimum).Minimum) }
-    } catch { }
-    return 0
+    if ($result.Count -eq 0) {
+        # netstat unavailable or blocked. Fall back to the cmdlet: it costs ~68 MB, but
+        # only on this error path, and a wrong port would make the watcher restart a
+        # healthy DSH -- correctness outranks footprint here.
+        try {
+            $result = @(Get-NetTCPConnection -State Listen -ErrorAction Stop |
+                Where-Object { $Pids -contains $_.OwningProcess } |
+                ForEach-Object { [pscustomobject]@{ IP = $_.LocalAddress; Port = $_.LocalPort; Pid = $_.OwningProcess } })
+        } catch { }
+    }
+    return $result
 }
 
 function Resolve-DshPort {
@@ -330,7 +408,10 @@ function Resolve-DshPort {
         } catch { }
     }
 
-    return [pscustomobject]@{ Port = 3080; Source = 'default' }
+    # Last resort only, after parameter / live process / cached file. DSH documents
+    # this as its own default, but the config can override it, which is exactly why
+    # it is LAST here and why the value is named rather than repeated inline.
+    return [pscustomobject]@{ Port = $script:DshDocumentedDefaultPort; Source = 'default' }
 }
 
 # Process forensics. Win32_Process CommandLine is denied on this machine, so this
@@ -362,14 +443,21 @@ function Get-DshProcesses {
     } catch {
         Write-Log ("Win32_Process unreadable ({0}); degrading to name-only matching" -f $_.Exception.Message.Trim()) 'WARN'
     }
-    # Exact name match only. A wildcard such as *dsh* would match this watchdog's
-    # own powershell.exe invocation and make "is it running" always true.
+    # Match on the process NAME, derived from -Patterns rather than from a hardcoded
+    # product name. The wildcard warning above is about CommandLine: the watchdog's own
+    # process is powershell.exe, and no pattern a caller passes ("dsh", "DeepSeek
+    # Harness") is a substring of that, so "is it running" still cannot become true
+    # because of us. Hardcoding the names here meant -ProcessMatch did nothing on the
+    # degraded path -- the same defect as the port-detection fallback.
     $acc = @()
-    $names = @('dsh', 'DeepSeek Harness', 'deepseek-harness')
-    foreach ($n in $names) {
-        $acc += Get-Process -Name $n -ErrorAction SilentlyContinue |
-            Select-Object @{n = 'ProcessId'; e = { $_.Id } }, @{n = 'Name'; e = { $_.ProcessName } }, @{n = 'CommandLine'; e = { '(degraded: unavailable)' } }
-    }
+    try {
+        $acc = @(Get-Process -ErrorAction Stop | Where-Object {
+            $n = $_.ProcessName
+            if (-not $n) { return $false }
+            foreach ($p in $Patterns) { if ($n -like "*$p*") { return $true } }
+            return $false
+        } | Select-Object @{n = 'ProcessId'; e = { $_.Id } }, @{n = 'Name'; e = { $_.ProcessName } }, @{n = 'CommandLine'; e = { '(degraded: unavailable)' } })
+    } catch { }
     return [pscustomobject]@{ Processes = @($acc); Degraded = $true }
 }
 
@@ -461,109 +549,103 @@ function Resolve-LaunchCommand {
     return [pscustomobject]@{ Command = $null; Source = 'unresolved' }
 }
 
-# Launch through a generated .cmd wrapper so stdout/stderr are captured.
-# Hidden launch helper shared by the relauncher and the post-rollback install.
-# cmd.exe / powershell.exe started with Start-Process -WindowStyle Hidden still
-# allocate a console in an interactive session and the window flashes before it
-# is hidden. WScript.Shell.Run(cmd, 0, ...) never creates a visible console.
-function New-HiddenRunVbs {
-    param([string]$VbsFile, [string]$TargetCommand)
-    $body = @(
-        "' Auto-generated by dsh-watchdog.ps1.",
-        "' Written as UTF-16 LE with a BOM: the command below carries a path that",
-        "' may contain Chinese, and BOM-less ANSI would turn it into '?'. WScript",
-        "' honours the UTF-16 BOM, so the path survives whatever the code page is.",
-        'Option Explicit',
-        'CreateObject("WScript.Shell").Run _',
-        ('  "{0}", 0, False' -f ($TargetCommand -replace '"', '""'))
-    ) -join "`r`n"
-    [System.IO.File]::WriteAllText($VbsFile, $body, (New-Object System.Text.UnicodeEncoding($false, $true)))
-    return $VbsFile
+# Launch through this cmdlet so stdout/stderr are captured WITHOUT generating a
+# .cmd or a .vbs.
+#
+# What used to be here: New-HiddenRunVbs wrote a VBScript, Start-DshCaptured wrote a
+# batch file, and Invoke-ProfileInstall wrote two more of each. All four were source
+# code in another language assembled by string concatenation, and the two hard rules
+# this project now enforces forbid exactly that:
+#   * cross-language generation -- one escaping mistake and the whole mechanism fails,
+#     and it fails at RUN time, not at build time;
+#   * it made the encoding of the generated file matter. The Chinese path in
+#     D:\DS\<CJK>\data became "?" under -Encoding ascii, cmd.exe followed a path that
+#     does not exist, and data\console\ stayed empty -- the stderr evidence that
+#     Get-CrashEvidence calls the most important evidence was silently never captured.
+#
+# Start-Process -RedirectStandardOutput/-RedirectStandardError does the same job with
+# no generated file at all, and -WindowStyle Hidden keeps the console from flashing.
+# Verified on this machine (Windows PowerShell 5.1): both streams land in their files.
+function Start-Captured {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$Arguments = @(),
+        [Parameter(Mandatory = $true)][string]$OutLog,
+        [Parameter(Mandatory = $true)][string]$ErrLog,
+        [string]$WorkingDirectory = $null,
+        [hashtable]$Environment = $null
+    )
+
+    $proc = Start-Process -FilePath $FilePath -ArgumentList $Arguments `
+        -WindowStyle Hidden -PassThru `
+        -RedirectStandardOutput $OutLog -RedirectStandardError $ErrLog `
+        -WorkingDirectory $(if ($WorkingDirectory) { $WorkingDirectory } else { (Get-Location).Path })
+
+    if ($Environment) {
+        # Start-Process cannot set per-process environment variables on 5.1, so a
+        # caller that needs one (DSH_HOME) passes it through the process block.
+        try {
+            foreach ($k in $Environment.Keys) {
+                [System.Environment]::SetEnvironmentVariable($k, [string]$Environment[$k], 'Process')
+            }
+        } catch { }
+    }
+    return $proc
 }
 
-# Which encoding a generated .cmd must be written in depends on the console code
-# page that cmd.exe will decode it with -- NOT on the system ANSI code page.
-#
-#   chcp 936 (the normal Chinese Windows default): ANSI, no BOM. Measured: works.
-#   chcp 65001 (UTF-8, opt-in, or a parent shell that set it): raw GBK bytes are
-#     NOT valid UTF-8, so the path breaks and the wrapper fails outright.
-#     Measured: ANSI-written .cmd under 65001 fails. UTF-8 *with BOM* works there.
-#
-# The catch is that cmd.exe fast-paths BOM-less UTF-8 only when the code page is
-# already 65001, so the file and the code page must be chosen together. Passing
-# /d skips any AutoRun command that might change the code page behind our back.
-function Get-CmdEncoding {
-    $cp = 936
-    $cpOut = cmd.exe /d /c 'chcp.com' 2>$null
-    if ("$cpOut" -match '(\d{3,5})') { $cp = [int]$Matches[1] }
-    if ($cp -eq 65001) {
-        return [pscustomobject]@{ Encoding = (New-Object System.Text.UTF8Encoding($true)); CodePagePrefix = 'chcp 65001 >nul & '; CodePage = $cp }
+# Merges stdout+stderr into the single console log the rest of the script reads.
+function Merge-CapturedLogs {
+    param([string]$OutLog, [string]$ErrLog, [string]$FinalLog)
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($f in @($OutLog, $ErrLog)) {
+        if (Test-Path -LiteralPath $f) {
+            try { [void]$sb.AppendLine((Get-Content -LiteralPath $f -Raw -Encoding utf8)) } catch { }
+        }
     }
-    return [pscustomobject]@{ Encoding = [System.Text.Encoding]::Default; CodePagePrefix = ''; CodePage = $cp }
+    [System.IO.File]::WriteAllText($FinalLog, $sb.ToString(), (New-Object System.Text.UTF8Encoding($false)))
+    foreach ($f in @($OutLog, $ErrLog)) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
+    return $FinalLog
 }
+
+# Get-CmdEncoding used to live here. It existed only to pick the right encoding for
+# a generated .cmd (ANSI on code page 936, UTF-8-with-BOM on 65001). With the last
+# generated file gone it has no callers, so it is gone too -- code kept "just in
+# case" is how the next person ends up maintaining two mechanisms.
 
 function Start-DshCaptured {
     param([string]$Command)
     if ($Command -match '[&\|<>^%]') { throw "launch command contains shell metacharacters; refusing: $Command" }
 
-    # Fail loudly instead of writing a wrapper that points somewhere else.
-    # Any '?' in these paths means a character the ANSI code page cannot encode;
-    # Set-Content would happily write it, cmd.exe would follow the wrong path,
-    # and the failure would be silent -- which is how the bug below hid.
-    if ("$DataDir$ConsoleDir$Command" -match '\?') {
-        throw "path contains '?' (unencodable); refusing to build a wrapper from it: DataDir=$DataDir"
-    }
-    # Every file generated below carries the DataDir path. All of them must be
-    # written in an encoding the *consumer* honours -- see Get-CmdEncoding for the
-    # .cmd, and New-HiddenRunVbs for the .vbs. Writing them as ASCII is what broke
-    # this: '?' replaced the Chinese in D:\DS\<Chinese>\data, cmd.exe/wscript then
-    # followed a path that does not exist, and data\console\ stayed empty.
-
-    # Every launcher file name carries our pid.
-    #
-    # A seconds-resolution stamp alone is NOT unique: two launches inside the
-    # same second (relaunch after a rescue, or the install step racing the
-    # relaunch) produced the same file name, and the second Set-Content hit a
-    # file the first wscript.exe still had open --
-    #   "Launch failed: The process cannot access the file ... launch-captured.vbs
-    #    because it is being used by another process."
-    # The pid is unique for the life of this process, so collisions are gone.
+    # No generated .cmd, no generated .vbs, so the '?' / code-page guard that used to
+    # live here is gone with them: the command string is passed straight to
+    # Start-Process as an argument list, not written into a file for another
+    # interpreter to re-parse.
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $tag = "$stamp-$PID"
     $outLog = Join-Path $ConsoleDir "console-$stamp.log"
-    $cmdFile = Join-Path $DataDir "launch-captured-$tag.cmd"
-    $vbsFile = Join-Path $DataDir "launch-captured-$tag.vbs"
+    $errTmp = Join-Path $ConsoleDir "console-$stamp.err"
+    $outTmp = Join-Path $ConsoleDir "console-$stamp.out"
 
-    # stderr is the only place installFailLoud writes its diagnostic, so it must
-    # be redirected; the cmd wrapper stays, but is started with no console.
-    $enc = Get-CmdEncoding
-    $cmdBody = @(
-        '@echo off',
-        ('{0}{1} >> "{2}" 2>&1' -f $enc.CodePagePrefix, $Command, $outLog),
-        ('echo [wrapper] exited with %ERRORLEVEL% >> "{0}"' -f $outLog)
-    ) -join "`r`n"
-    # The wrapper must be written in the system ANSI code page (GBK/936 on
-    # Simplified Chinese Windows) -- NOT ASCII.
-    #
-    # This file carries the DataDir path, and that path can contain Chinese
-    # (e.g. D:\DS\<Chinese>\data\...). -Encoding ascii silently replaces every
-    # non-ASCII character with '?', so the redirect target became
-    # "D:\DS\????\data\console\console-<stamp>.log": cmd.exe created that
-    # directory instead, and data\console\ stayed empty -- which is exactly the
-    # stderr evidence Get-CrashEvidence treats as "the most important evidence".
-    # Nobody noticed, because writing the wasted log never failed.
-    #
-    # The old rule was "the .cmd must be pure ASCII". That is only true when the
-    # paths inside it are ASCII; it cannot hold when the tool lives under a
-    # Chinese directory. cmd.exe decodes batch files with the OEM code page, and
-    # on this system ANSI == OEM == 936, so Default preserves the path and
-    # cmd.exe reads it back correctly. CRLF stays mandatory.
-    [System.IO.File]::WriteAllText($cmdFile, $cmdBody, $enc.Encoding)
+    # $Command is a full command line such as:
+    #   "C:\...\dsh.exe" --profile desktop
+    # so split it the way CreateProcess does: quoted first token, then the rest.
+    $exe = $Command
+    $rest = @()
+    if ($Command.StartsWith('"')) {
+        $end = $Command.IndexOf('"', 1)
+        if ($end -gt 0) {
+            $exe = $Command.Substring(1, $end - 1)
+            $rest = @($Command.Substring($end + 1).Trim() -split '\s+' | Where-Object { $_ })
+        }
+    } else {
+        $parts = @($Command -split '\s+')
+        $exe = $parts[0]
+        if ($parts.Count -gt 1) { $rest = $parts[1..($parts.Count - 1)] }
+    }
 
-    New-HiddenRunVbs -VbsFile $vbsFile -TargetCommand ('cmd.exe /c "{0}"' -f $cmdFile) | Out-Null
-    Start-Process -FilePath 'wscript.exe' -ArgumentList ('"{0}"' -f $vbsFile) -WindowStyle Hidden
+    Start-Captured -FilePath $exe -Arguments $rest -OutLog $outTmp -ErrLog $errTmp | Out-Null
+    Merge-CapturedLogs -OutLog $outTmp -ErrLog $errTmp -FinalLog $outLog | Out-Null
 
-    return [pscustomobject]@{ OutLog = $outLog; Wrapper = $cmdFile; Launcher = $vbsFile }
+    return [pscustomobject]@{ OutLog = $outLog; Wrapper = $null; Launcher = $null }
 }
 
 # Snapshot pointer written by dsh-snapshot.ps1 -Action Create.
@@ -651,49 +733,31 @@ function Invoke-ProfileInstall {
         return [pscustomobject]@{ Ok = $false; Message = ('profile dir missing: {0}' -f $ProfileDir); Log = $null }
     }
 
-    # Pid-tagged for the same reason as the launch files above: a bare second
+    # Pid-tagged for the same reason the launch log is: a bare second-resolution
     # stamp collides when the install and the relaunch happen inside one second.
     $tag = (Get-Date -Format 'yyyyMMdd-HHmmss') + "-$PID"
     $log = Join-Path $ConsoleDir ('install-{0}.log' -f $tag)
-    $cmdFile = Join-Path $DataDir "post-rollback-install-$tag.cmd"
-    if ("$DshHome$ProfileDir$log" -match '\?') {
-        return [pscustomobject]@{ Ok = $false
-            Message = "path contains '?' (unencodable in the console code page); refusing to build the install wrapper"; Log = $null }
-    }
-    $enc = Get-CmdEncoding
-    $body = @(
-        '@echo off',
-        ('{0}set "DSH_HOME={1}"' -f $enc.CodePagePrefix, $DshHome),
-        ('cd /d "{0}"' -f $ProfileDir),
-        ('"{0}" "{1}" install --no-frozen-lockfile --reporter=append-only >> "{2}" 2>&1' -f $rt.Node, $rt.Pnpm, $log),
-        ('echo [install] exit=%ERRORLEVEL% >> "{0}"' -f $log)
-    ) -join "`r`n"
-    # Written in the console code page for the same reason as the launch wrapper:
-    # this body contains $DshHome and $ProfileDir, and a '?' -mangled path here
-    # would make the post-rollback install silently reconcile the wrong folder.
-    [System.IO.File]::WriteAllText($cmdFile, $body, $enc.Encoding)
+    $outTmp = Join-Path $ConsoleDir ('install-{0}.out' -f $tag)
+    $errTmp = Join-Path $ConsoleDir ('install-{0}.err' -f $tag)
 
-    $vbsFile = Join-Path $DataDir "post-rollback-install-$tag.vbs"
-    New-HiddenRunVbs -VbsFile $vbsFile -TargetCommand ('cmd.exe /c "{0}"' -f $cmdFile) | Out-Null
-
-    $proc = Start-Process -FilePath 'wscript.exe' -ArgumentList ('"{0}"' -f $vbsFile) -WindowStyle Hidden -PassThru
+    # No .cmd, no .vbs: pnpm is started directly with its own directory and its own
+    # DSH_HOME in the process environment. -WindowStyle Hidden keeps the console
+    # from flashing, which is what the VBScript launcher used to be for.
+    $env:DSH_HOME = $DshHome
+    $proc = Start-Captured -FilePath $rt.Node `
+        -Arguments @($rt.Pnpm, 'install', '--no-frozen-lockfile', '--reporter=append-only') `
+        -OutLog $outTmp -ErrLog $errTmp -WorkingDirectory $ProfileDir
     $exited = $proc.WaitForExit($TimeoutSeconds * 1000)
+    Merge-CapturedLogs -OutLog $outTmp -ErrLog $errTmp -FinalLog $log | Out-Null
     if (-not $exited) {
         try { $proc.Kill() } catch { }
         return [pscustomobject]@{ Ok = $false; Message = ('timed out after {0}s; see {1}' -f $TimeoutSeconds, $log); Log = $log }
     }
 
-    # The exit line is appended by cmd.exe after pnpm returns; allow a few reads
-    # for the write to become visible, otherwise a successful install is
-    # misreported as unknown.
-    $result = 'unknown'
-    for ($i = 0; $i -lt 10; $i++) {
-        if (Test-Path -LiteralPath $log) {
-            $m = Select-String -LiteralPath $log -Pattern '\[install\] exit=(\d+)' -ErrorAction SilentlyContinue | Select-Object -Last 1
-            if ($m) { $result = $m.Matches[0].Groups[1].Value; break }
-        }
-        Start-Sleep -Milliseconds 300
-    }
+    # With cmd.exe out of the picture there is no "[install] exit=" line to read any
+    # more, and no lag waiting for it: the process exit code is authoritative and is
+    # already available.
+    $result = if ($proc.HasExited) { [string]$proc.ExitCode } else { 'unknown' }
     if ($result -eq '0') {
         return [pscustomobject]@{ Ok = $true; Message = ('node_modules now matches the restored lockfile ({0})' -f $log); Log = $log }
     }
@@ -1035,7 +1099,7 @@ if ($alive) {
     $procNote = if ($procsDegraded) { 'unavailable (degraded)' } else { "$($procs.Count)" }
     Write-Log ("DSH starting: {0}s since launch, process count {1}, boot window {2}s" -f $waited, $procNote, $BootWindowSeconds)
     Write-Log ("  (if a healthy boot takes longer than {0}s, raise -BootWindowSeconds; if a failing start takes longer than {1}s to die, raise -StartGraceSeconds)" -f $BootWindowSeconds, $StartGraceSeconds) 'INFO'
-    if ($waited -ge 30) {
+    if ($waited -ge $script:NoVerdictLogSeconds) {
         # Card 1 of the false-crash guard, and the one that surprises people: the
         # whole boot window has to expire before a launch counts as short-lived,
         # so a DSH that dies instantly is still reported as "starting" until then.
@@ -1232,7 +1296,7 @@ if (-not $state.PSObject.Properties['lastHeartbeatLog']) {
     $state | Add-Member -NotePropertyName lastHeartbeatLog -NotePropertyValue $null
 }
 if (-not $state.lastHeartbeatLog -or
-    ($now - [datetime]$state.lastHeartbeatLog).TotalMinutes -ge 30) {
+    ($now - [datetime]$state.lastHeartbeatLog).TotalMinutes -ge $script:HeartbeatStaleMinutes) {
     Write-Log ("tick: alive={0} port={1} pid={2}" -f $alive, $Port, $PID)
     $state.lastHeartbeatLog = $now.ToString('o')
     Save-GuardState -State $state

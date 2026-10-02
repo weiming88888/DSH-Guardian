@@ -315,7 +315,7 @@ rather than listing them; pass `-Action List` to look without writing.
 
 ## Reporting a problem
 
-Double-click the **「DSH Guardian 诊断」** desktop shortcut. It collects
+Double-click the **「DSH Guardian 诊断」** desktop shortcut (it runs `dsh-guardian.exe diagnostics`). It collects
 everything needed to diagnose a fault and writes a Chinese report to
 `data\诊断报告\诊断报告-<date>-<time>.txt`, then opens both the report and its
 folder.
@@ -337,7 +337,7 @@ app\                               program (ASCII file names on purpose)
   collect-diagnostics.ps1            diagnostic collector
   Guardian.exe.cs                    C# source for the exe
   build.ps1                          rebuild with csc
-  dsh-guardian.ico                   icon
+  dsh-guardian-app.ico                   icon
 docs\
   GUIDE-zh.md                        full user guide (Chinese)
   TECHNICAL.md                       technical reference (English)

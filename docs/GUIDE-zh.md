@@ -314,11 +314,11 @@ D:\DS\崩溃回退\
 │   ├── dsh-guardian.exe        主程序，双击这个
 │   ├── dsh-watchdog.ps1        监视器核心逻辑
 │   ├── dsh-snapshot.ps1        快照与回退
-│   ├── launch-diagnostics.cmd  诊断启动器（桌面快捷方式指向它）
+│   ├── launch-diagnostics.cmd  诊断启动器（命令行备用；桌面快捷方式现为 app\dsh-guardian.exe diagnostics）
 │   ├── collect-diagnostics.ps1 诊断收集脚本
 │   ├── Guardian.exe.cs         主程序源码
 │   ├── build.ps1               重新编译用
-│   └── dsh-guardian.ico        图标
+│   └── dsh-guardian-app.ico        图标
 │
 ├── data\                    ← 全部运行数据
 │   ├── watchdog.log            运行日志（可直接看）

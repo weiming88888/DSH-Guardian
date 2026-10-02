@@ -24,7 +24,7 @@ if (-not $PSScriptRoot) {
 }
 if (-not $Source) { $Source = Join-Path $here 'Guardian.exe.cs' }
 if (-not $Out) { $Out = Join-Path $here 'dsh-guardian.exe' }
-if (-not $Icon) { $Icon = Join-Path $here 'dsh-guardian.ico' }
+if (-not $Icon) { $Icon = Join-Path $here 'dsh-guardian-app.ico' }
 
 $csc = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $csc)) {
@@ -52,21 +52,42 @@ if (-not (Test-Path -LiteralPath $Icon)) {
     Write-Host "icon generated: $Icon"
 }
 
-$cscArgs = @(
+# Two builds, one product:
+#   dsh-guardian.exe         the WinForms shell - what the desktop shortcut runs
+#   dsh-guardian-console.exe the console build kept for CLI verbs (logs, baseline,
+#                            arm/disarm) and for the version picker the GUI calls
+# /target:winexe is what stops a console window appearing.
+#
+# The manifest declares DPI awareness to the OS. Without it the process was
+# DPI-virtualised: a window designed as 1120x470 client opened at 761x351 physical
+# with the whole UI bitmap-stretched, and SetProcessDPIAware() from managed Main was
+# not honoured. A manifest applies before any managed code runs.
+$manifest = Join-Path $here 'Guardian.manifest'
+$commonArgs = @(
     '/nologo',
-    # /target:winexe is what stops the window. /target:exe builds a console
-    # (CUI) program, and Task Scheduler allocates a visible console window for
-    # those no matter how the task is configured - that was the popup.
     '/target:winexe',
     '/platform:anycpu', '/optimize+',
-    "/out:$Out", "/win32icon:$Icon",
-    '/r:System.dll', '/r:System.Drawing.dll',
-    $Source
+    "/win32icon:$Icon",
+    # System.Core and Microsoft.CSharp used to be needed for the `dynamic` COM calls
+    # that wrote the desktop shortcut. The shortcut is now written by make-shortcut.ps1,
+    # so nothing in this source uses dynamic any more and the extra references are gone.
+    '/r:System.dll', '/r:System.Drawing.dll'
 )
+if (Test-Path -LiteralPath $manifest) { $commonArgs += "/win32manifest:$manifest" }
+else { Write-Host "WARNING: $manifest missing - the window may open DPI-virtualised" }
 
-Write-Host "compiling: $Source"
-& $csc $cscArgs
-if ($LASTEXITCODE -ne 0) { throw "compile failed with exit code $LASTEXITCODE" }
+$guiSource = Join-Path $here 'Guardian.Win.cs'
+$guiOut    = Join-Path $here 'dsh-guardian.exe'
+$conOut    = Join-Path $here 'dsh-guardian-console.exe'
+
+Write-Host "compiling GUI   : $guiSource"
+& $csc ($commonArgs + @('/r:System.Windows.Forms.dll', "/out:$guiOut", $guiSource))
+if ($LASTEXITCODE -ne 0) { throw "GUI compile failed with exit code $LASTEXITCODE" }
+
+Write-Host "compiling console: $Source"
+& $csc ($commonArgs + @("/out:$conOut", $Source))
+if ($LASTEXITCODE -ne 0) { throw "console compile failed with exit code $LASTEXITCODE" }
+$Out = $guiOut
 
 $exe = Get-Item -LiteralPath $Out
 Write-Host ''

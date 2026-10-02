@@ -43,7 +43,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('Create', 'List', 'Verify', 'Restore', 'Mark-Good', 'Promote')]
+    [ValidateSet('Create', 'List', 'Verify', 'Restore', 'Mark-Good', 'Promote', 'Delete')]
     [string]$Action = 'Create',
     # -DataDir takes precedence and must be passed explicitly when the caller
     # invokes this with -File: under Windows PowerShell 5.1 $PSScriptRoot can be
@@ -400,5 +400,97 @@ switch ($Action) {
         Write-Host ("  plugins in that snapshot: {0}" -f ($bundles -join ', '))
         Write-Host 'Auto-rollback will now use THIS snapshot.'
         Write-Host 'Run -Action Restore to apply it now, or leave it for the next crash.'
+    }
+    'Delete' {
+        # Removes snapshot directories. Separate from Restore on purpose: Restore
+        # changes the live DSH config, Delete only changes what is kept on disk.
+        #
+        # Guards, because this is the one destructive action here:
+        #   - refuses to touch anything that is not a snap-* directory under the
+        #     snapshot root (no wildcards out of the tree, no pre-restore folders)
+        #   - if the deleted snapshot is the current rollback target, the pointer is
+        #     moved to the newest remaining snapshot, or cleared if none is left --
+        #     a dangling pointer would make a later crash unrollbackable
+        if (-not $Snapshot) { throw 'Delete needs -Snapshot <name> or -All. Use -Action List to see the names.' }
+
+        $pointerFile = Join-Path (Split-Path -Parent $SnapshotRoot) 'last-known-good.json'
+        $active = ''
+        if (Test-Path -LiteralPath $pointerFile) {
+            try { $active = [string](Get-Content -LiteralPath $pointerFile -Raw -Encoding utf8 | ConvertFrom-Json).snapshot } catch { }
+        }
+
+        $names = @()
+        if ($All) {
+            $names = @(Get-ChildItem -LiteralPath $SnapshotRoot -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -like 'snap-*' } | Sort-Object Name -Descending | ForEach-Object { $_.Name })
+            if ($names.Count -eq 0) { Write-Host 'No snapshots to delete.'; return }
+        } else {
+            foreach ($n in @($Snapshot -split ',')) {
+                $t = $n.Trim()
+                if ($t.Length -gt 0) { $names += (Resolve-Snapshot -Name $t).Name }
+            }
+        }
+
+        if (-not $DryRun) {
+            Write-Host ''
+            Write-Host ("About to DELETE {0} snapshot(s):" -f $names.Count)
+            foreach ($n in $names) { Write-Host ("  - {0}{1}" -f $n, $(if ($n -eq $active) { '   <== current rollback target' } else { '' })) }
+            Write-Host 'The files are removed. This is the one action here that cannot be undone.'
+        }
+
+        $deleted = @()
+        foreach ($n in $names) {
+            $dir = Join-Path $SnapshotRoot $n
+            $leaf = Split-Path -Leaf $dir
+            if (-not ($leaf -like 'snap-*')) { Write-Host ("  skipped (not a snapshot): {0}" -f $leaf); continue }
+            if (-not (Test-Path -LiteralPath $dir -PathType Container)) { Write-Host ("  skipped (missing): {0}" -f $leaf); continue }
+            if ($DryRun) { Write-Host ("  would delete: {0}" -f $dir); $deleted += $leaf; continue }
+            try {
+                Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction Stop
+                Write-Host ("  deleted: {0}" -f $leaf)
+                $deleted += $leaf
+            } catch {
+                Write-Host ("  FAILED to delete {0}: {1}" -f $leaf, $_.Exception.Message)
+            }
+        }
+
+        # Keep the pointer honest.
+        if (-not $DryRun -and $deleted -contains $active) {
+            $rest = @(Get-ChildItem -LiteralPath $SnapshotRoot -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -like 'snap-*' } | Sort-Object Name -Descending)
+            if ($rest.Count -gt 0) {
+                $newest = $rest[0]
+                $manFile = Join-Path $newest.FullName 'manifest.json'
+                $bundles = @(); $deps = @{}
+                if (Test-Path -LiteralPath $manFile) {
+                    $man = Get-Content -LiteralPath $manFile -Raw -Encoding utf8 | ConvertFrom-Json
+                    $bundles = @($man.bundles)
+                    if ($man.dependencies) { $deps = $man.dependencies }
+                }
+                $pointer = [ordered]@{
+                    snapshot        = $newest.Name
+                    snapshotRoot    = $SnapshotRoot
+                    profileName     = $ProfileName
+                    dshHome         = $DshHome
+                    bundles         = $bundles
+                    dependencies    = $deps
+                    observedHealthy = $true
+                    createdAt       = (Get-Date).ToString('o')
+                    note            = 'target moved here because the previous target was deleted'
+                }
+                ($pointer | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $pointerFile -Encoding utf8
+                Write-Host ''
+                Write-Host ("Rollback target was the deleted snapshot; it is now: {0}" -f $newest.Name)
+            } else {
+                Remove-Item -LiteralPath $pointerFile -Force -ErrorAction SilentlyContinue
+                Write-Host ''
+                Write-Host 'Rollback target was the deleted snapshot and no snapshots remain.'
+                Write-Host 'Auto-rollback now has no target: it will refuse to roll back until a new baseline is taken.'
+            }
+        }
+
+        Write-Host ''
+        if ($DryRun) { Write-Host ("Dry run: {0} snapshot(s) would be deleted." -f $deleted.Count) }
+        else { Write-Host ("Deleted {0} snapshot(s). Remaining: {1}" -f $deleted.Count, @(Get-ChildItem -LiteralPath $SnapshotRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'snap-*' }).Count) }
     }
 }
