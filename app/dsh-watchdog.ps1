@@ -36,7 +36,9 @@
 #>
 [CmdletBinding()]
 param(
-    [int]$Port = 19387,
+    # 0 = auto-detect the port DSH actually listens on (recommended, and the
+    # default). Pass a number to pin it and skip detection entirely.
+    [int]$Port = 0,
     # Where state, logs and snapshots live. The launcher always passes this
     # explicitly; the default only matters when the script is run by hand.
     # It is resolved after the param block below, because $PSScriptRoot is EMPTY
@@ -116,6 +118,7 @@ $ProfileDir = Join-Path (Join-Path $DshHome 'profiles') $ProfileName
 $ConsoleDir = Join-Path $DataDir 'console'
 $modeFile = Join-Path $DataDir 'mode.json'
 $runtimeFile = Join-Path $DataDir 'runtime.pid'
+$portFile = Join-Path $DataDir 'port.txt'
 
 # ------------------------------------------------------- single instance guard
 # Only a resident runtime can pile up, so one pid file keeps it to a single
@@ -249,6 +252,85 @@ function Test-PortAlive {
     } finally {
         $client.Close()
     }
+}
+
+# ------------------------------------------------------------- port detection
+# Why auto-detect: DSH's own default is 3080, but the port actually in use is
+# whatever the running app chose -- this machine runs 19387, set outside the
+# five config files we are allowed to read (the only trace of it in the profile
+# is a plugin's webUrl). A wrong port makes every probe report a crash that is
+# not happening, and then the "crash loop" logic restarts a perfectly healthy
+# DSH. So the port is discovered from the process that owns it, not assumed.
+#
+# Order matters:
+#   1. -Port, when the user pinned one.
+#   2. The live listening port of a running DSH -- authoritative, because a
+#      socket that is accepting connections cannot be wrong.
+#   3. data\port.txt, written on every successful detection: after a crash DSH
+#      is gone, so 2 is unavailable exactly when the watcher needs it most.
+#   4. 3080, DSH's documented default.
+function Get-DshListeningPort {
+    param([string[]]$Patterns)
+    $pids = @()
+    try {
+        $rows = Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+            $cl = $_.CommandLine
+            if (-not $cl) { return $false }
+            if ($cl -like "*$script:SelfPath*") { return $false }
+            if ($cl -like '*dsh-watchdog.ps1*') { return $false }
+            if ($cl -like '*dsh-snapshot.ps1*') { return $false }
+            foreach ($p in $Patterns) { if ($cl -like "*$p*") { return $true } }
+            return $false
+        }
+        if ($rows) { $pids = @($rows | ForEach-Object { $_.ProcessId }) }
+    } catch { }
+
+    if ($pids.Count -eq 0) {
+        try { $pids = @(Get-Process -Name 'DeepSeek Harness' -ErrorAction Stop | ForEach-Object { $_.Id }) } catch { }
+    }
+    if ($pids.Count -eq 0) { return 0 }
+
+    try {
+        $conns = Get-NetTCPConnection -State Listen -ErrorAction Stop |
+            Where-Object { $pids -contains $_.OwningProcess -and $_.LocalAddress -in @('127.0.0.1', '0.0.0.0', '::', '::1') }
+        if ($conns) {
+            # Lowest wins: the app's IPC/dev ports are ephemeral high numbers,
+            # and the web UI is the one the user configured.
+            return [int](($conns | Measure-Object -Property LocalPort -Minimum).Minimum)
+        }
+    } catch { }
+
+    try {
+        $conns = Get-NetTCPConnection -State Listen -ErrorAction Stop |
+            Where-Object { $pids -contains $_.OwningProcess }
+        if ($conns) { return [int](($conns | Measure-Object -Property LocalPort -Minimum).Minimum) }
+    } catch { }
+    return 0
+}
+
+function Resolve-DshPort {
+    param([int]$Explicit, [string[]]$Patterns)
+
+    if ($Explicit -gt 0) {
+        return [pscustomobject]@{ Port = $Explicit; Source = 'parameter' }
+    }
+
+    $live = Get-DshListeningPort -Patterns $Patterns
+    if ($live -gt 0) {
+        try { Set-Content -LiteralPath $portFile -Value $live -Encoding ascii } catch { }
+        return [pscustomobject]@{ Port = $live; Source = 'live-process' }
+    }
+
+    if (Test-Path -LiteralPath $portFile) {
+        try {
+            $cached = 0
+            if ([int]::TryParse((Get-Content -LiteralPath $portFile -Raw).Trim(), [ref]$cached) -and $cached -gt 0) {
+                return [pscustomobject]@{ Port = $cached; Source = 'cached' }
+            }
+        } catch { }
+    }
+
+    return [pscustomobject]@{ Port = 3080; Source = 'default' }
 }
 
 # Process forensics. Win32_Process CommandLine is denied on this machine, so this
@@ -813,8 +895,21 @@ if ($residentWanted) {
 }
 
 $roundIndex = 0
+# Log the detection result only when it changes; a heartbeat every 55s would
+# bury everything else in the log.
+$lastPortLogged = ''
 do {
 $roundIndex++
+
+# Re-resolved every round on purpose: DSH may restart on a different port, and
+# an explicit -Port still short-circuits this to a fixed value.
+$resolved = Resolve-DshPort -Explicit $Port -Patterns $ProcessMatch
+$Port = $resolved.Port
+$portSource = $resolved.Source
+if ("$Port|$portSource" -ne $lastPortLogged) {
+    Write-Log ("Probe port {0} (source: {1})" -f $Port, $portSource) 'INFO'
+    $lastPortLogged = "$Port|$portSource"
+}
 
 $now = Get-Date
 $alive = Test-PortAlive -TargetHost '127.0.0.1' -TargetPort $Port -TimeoutMs $ProbeTimeoutMs
