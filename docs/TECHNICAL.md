@@ -33,7 +33,7 @@ This is a hard requirement, not a nicety:
 | Scheduled task | **none** (removed; a per-minute task contradicts zero idle cost) |
 | Autostart / Run key | **none** |
 | Resident process when idle | **none** |
-| Started by | the desktop shortcut only, and only when you press `4` |
+| Started by | the desktop shortcut or `app\dsh-guardian.exe`, and only when you click 开关监视 |
 | Stopped by | closing that window (the watcher is bound to it) |
 
 The watcher is started by `dsh-guardian.exe` with `-Resident -ParentPid <own pid>`
@@ -47,7 +47,7 @@ window the user opened.
 ```
 D:\DS\崩溃回退\
   app\                          program (all ASCII names)
-    dsh-guardian.exe               launcher + menu (GUI subsystem, winexe)
+    dsh-guardian.exe               GUI build: main window; forwards CLI verbs (winexe)
     dsh-watchdog.ps1               watcher: probe, decide, roll back
     dsh-snapshot.ps1               snapshots, restore, mark-baseline
     launch-diagnostics.cmd         diagnostic launcher (ASCII + CRLF); the desktop shortcut now runs dsh-guardian.exe diagnostics instead
@@ -57,7 +57,7 @@ D:\DS\崩溃回退\
     dsh-guardian-app.ico               icon
   data\                          all runtime state
     mode.json / state.json / last-tick.json / last-known-good.json / runtime.pid
-    watchdog.log / events.jsonl / exe-trace.log / dsh-guardian.out.log
+    watchdog.log / events.jsonl / exe-trace.log / gui-clicks.log / gui-window.json
     console\                       captured stdout+stderr from DSH launches
     诊断报告\                       diagnostic reports (one per run, timestamped)
     snapshots\                     snap-<stamp>-<label>\ and pre-restore-<stamp>\
@@ -146,8 +146,8 @@ ASCII *file* names are never visible.
 
 ### 3. `.cs` and `.md` have no such limit
 
-The C# compiler and editors handle them as UTF-8. The Chinese menu in
-`Guardian.exe.cs` is written directly.
+The C# compiler and editors handle them as UTF-8. The Chinese strings in
+`Guardian.exe.cs` (the console build's interactive screen) are written directly.
 
 ---
 
@@ -203,17 +203,25 @@ of failing on it.
 ## CLI
 
 ```
-dsh-guardian.exe            open the menu
+dsh-guardian.exe            open the main window (no arguments)
 dsh-guardian.exe logs       show the error log
 dsh-guardian.exe baseline   mark the current state as the good baseline
-dsh-guardian.exe rollback   roll back now (asks first)
+dsh-guardian.exe rollback   pick a version, then roll back / set target
 dsh-guardian.exe preview    show the rollback plan, writes nothing
 dsh-guardian.exe arm        start watching (runs with this window)
 dsh-guardian.exe disarm     stop watching
+dsh-guardian.exe on | off   same as arm | disarm
 dsh-guardian.exe shortcut   create the desktop shortcut (manual only)
+dsh-guardian.exe diagnostics  collect a diagnostic report (as the shortcut does)
+dsh-guardian.exe help | ?   the same text
 ```
 
-`dsh-snapshot.ps1` also accepts `-Action Create|List|Verify|Restore|Mark-Good`.
+Both builds accept these verbs: the GUI build forwards any recognised verb to
+`dsh-guardian-console.exe` next to it, so `dsh-guardian.exe shortcut` works as
+documented and there is only one implementation of each verb.
+
+`dsh-snapshot.ps1` also accepts
+`-Action Create|List|Verify|Restore|Mark-Good|Promote|Delete`.
 
 ---
 
@@ -231,7 +239,8 @@ allocates a **visible console window**. That was the intermittent terminal popup
 
 ## Diagnostics
 
-Double-click the "DSH Guardian 诊断" shortcut, or run `launch-diagnostics.cmd`.
+Double-click the "DSH Guardian 诊断" shortcut (it runs `dsh-guardian.exe diagnostics`),
+or run `launch-diagnostics.cmd` directly.
 It writes a Chinese report into **`data\诊断报告\诊断报告-<stamp>.txt`** - inside
 the tool folder, never onto the desktop - and opens both the report and its
 folder. Contents: program type (PE subsystem), script ASCII purity, mode, watcher
@@ -254,4 +263,5 @@ decoding `$ZH` entries - the script itself stays ASCII, as required above.
   round of false crash detection. `-Port` remains the way to pin it.
 - The watcher only runs while its window is open. That is the price of "nothing
   runs unless I open it"; the two cannot both be satisfied.
-- Snapshot names are long; the menu trims the `snap-` prefix when displaying.
+- Snapshot names are long; the version-selection dialog trims the `snap-` prefix
+  when displaying.
