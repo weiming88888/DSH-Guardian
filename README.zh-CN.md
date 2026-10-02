@@ -355,6 +355,10 @@ _archive\<日期>-pre-qc\           质检前的本地备份
 所以 `.gitignore` 把它排除在外。`data\console\` 只有在真的通过包装脚本启动过一次
 之后才会有文件，正常安装下它是空的。
 
+包里另行排除了三类**只服务 GitHub 页面**的文件，它们留在仓库里但不随包分发：
+`docs\hero.png`、`docs\social-preview.png`（宣传图）与对应的 `.html` 渲染源，
+以及仓库维护用的 `docs\ASSETS.md`。去掉它们后包体从 951 KB 降到 417 KB。
+
 ## 重新编译
 
 只用了 Windows 自带的 .NET Framework `csc.exe`，**不需要装 SDK**：

@@ -366,6 +366,11 @@ your local paths and plugin list, which is why `.gitignore` excludes it.
 `data\console\` stays empty until a launch actually goes through the wrapper, so
 an empty folder there is normal on a healthy install.
 
+Three kinds of file are deliberately left out of the ZIP because they only serve the
+GitHub page: `docs\hero.png` and `docs\social-preview.png` (promotional art) with their
+`.html` render sources, and `docs\ASSETS.md` (repo maintenance notes). Excluding them
+takes the archive from 951 KB to 417 KB.
+
 ## Rebuilding
 
 Only the .NET Framework `csc.exe` that ships with Windows is needed - **no SDK**:
