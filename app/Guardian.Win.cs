@@ -1197,7 +1197,16 @@ namespace GuardianGui
                 if (pid > 0)
                 {
                     Append(T("\u76D1\u89C6\u5DF2\u5F00\u542F\uFF08\u8FDB\u7A0B ") + pid + T("\uFF09\u3002\u88C5\u5B8C\u63D2\u4EF6\u540E\u56DE\u6765\u91CD\u65B0\u6253\u57FA\u7EBF\u3002"));
-                    Append(T("\u672C\u7A97\u53E3\u53EF\u4EE5\u5173\u6389\uFF1A\u76D1\u89C6\u8DD1\u5728\u72EC\u7ACB\u8FDB\u7A0B\u91CC\uFF0C\u4E0D\u4F9D\u8D56\u8FD9\u4E2A\u754C\u9762\u3002"));
+                    // This line used to read "本窗口可以关掉：监视跑在独立进程里，不依赖这个界面"
+                    // -- the exact opposite of what the program does. The watcher is started
+                    // with -ParentPid <this process> and exits as soon as this window's
+                    // process is gone, which is what the status line eighty lines above
+                    // already says ("关掉本窗口即停止") and what the exit dialog warns about.
+                    //
+                    // The false version is the one users read, because it appears exactly when
+                    // they have just armed the guard -- so it also leaked into the README, the
+                    // Chinese guide and the pinned issue. One wrong string, copied outward.
+                    Append(T("\u672C\u7A97\u53E3\u5C31\u662F\u5F00\u5173\uFF1A\u76D1\u89C6\u5668\u7ED1\u5B9A\u5728\u5B83\u4E0A\uFF0C\u5173\u6389\u7A97\u53E3\u5C31\u4F1A\u505C\u6B62\u76D1\u89C6\u3002"));
                 }
                 else
                 {
