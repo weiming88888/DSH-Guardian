@@ -88,27 +88,61 @@ $b=[IO.File]::ReadAllBytes('...\dsh-watchdog.ps1'); ($b | Where-Object { $_ -gt 
 When Chinese output is needed, `collect-diagnostics.ps1` stores it as UTF-8 hex
 in the `$ZH` table and decodes it at runtime with `T`. Keep that pattern.
 
-### 2. `.cmd` must be pure ASCII **and** use CRLF
+### 2. Every *generated* file must be written in the encoding its consumer honours
 
-`cmd.exe` decodes batch files with the **OEM code page** and there is no BOM that
-can save you:
+The rule is **not** "generated files must be pure ASCII". That belief caused a
+silent data-loss bug, found twice:
 
-- non-ASCII bytes get decoded as garbage and **corrupt the command name**
-  (a Chinese byte sequence can even swallow the newline, gluing the next command
-  onto a `rem` line)
-- bare LF line endings can make `cmd.exe` read several lines as one and split
-  words in half
+The relaunch path generates two files that both carry the `data\` path — a `.cmd`
+wrapper and a `.vbs` launcher. Written with `-Encoding ascii` under a Chinese
+directory (`D:\DS\<Chinese>\data\`), every non-ASCII character became `?`:
 
-Verify (both must be `0`):
+```
+.cmd  -> cmd.exe wrote D:\DS\????\data\console\console-<stamp>.log
+.vbs  -> wscript.exe reported "The system cannot find the path specified."
+```
+
+Real `data\console\` stayed empty, so the stderr evidence `Get-CrashEvidence`
+calls *the most important evidence* was never captured. Nothing failed loudly,
+because the misdirected log wrote fine.
+
+Measured matrix for the `.cmd` (this is why the encoding is chosen at runtime, not
+hard-coded):
+
+| Console code page | ANSI, no BOM | UTF-8 **with** BOM |
+|---|---|---|
+| 936 (Chinese Windows default) | works | fails (BOM read as part of the name) |
+| 65001 (UTF-8) | fails (GBK bytes are not valid UTF-8) | works |
+
+So each generated file gets the encoding its own reader understands:
+
+| File | Consumer | Written as |
+|---|---|---|
+| `launch-captured-*.cmd`, `post-rollback-install-*.cmd` | `cmd.exe` | console code page (ANSI, or UTF-8+BOM under 65001 — chosen by `Get-CmdEncoding`) |
+| `launch-captured-*.vbs` | `wscript.exe` | **UTF-16 LE with BOM** — honoured regardless of code page |
+| `mode.json`, `state.json`, `*.jsonl`, reports | PowerShell / the exe | UTF-8 (unchanged, always worked) |
+| `runtime.pid` | PowerShell | ASCII (digits only) |
+
+The wrapper is also built with `cmd.exe /d` so an AutoRun command cannot change
+the code page behind our back, and both generators **refuse to run** rather than
+build a wrapper from a path containing `?`.
+
+**Rule of thumb: a generated file that carries a path must be written in the
+encoding the consumer uses to read it, and verified by reading it back.**
+
+Verify a real capture, end to end (not by inspection):
 
 ```powershell
-$b=[IO.File]::ReadAllBytes('...\launch-diagnostics.cmd')
-($b | Where-Object { $_ -gt 127 }).Count                                  # non-ASCII
-[regex]::Matches([Text.Encoding]::ASCII.GetString($b),"(?<!`r)`n").Count  # bare LF
+# 1. The wrappers decode with the right encoding and no '?' appears:
+Get-Content '...\data\launch-captured-*.cmd' -Encoding Default
+Get-Content '...\data\launch-captured-*.vbs' -Encoding Unicode
+# 2. CRLF only (bare LF must be 0):
+$b=[IO.File]::ReadAllBytes('...\app\launch-diagnostics.cmd')
+[regex]::Matches([Text.Encoding]::ASCII.GetString($b),"(?<!`r)`n").Count
 ```
 
 Chinese names live in the **desktop shortcuts**, which the user sees, so the
-ASCII file names are never visible.
+ASCII *file* names are never visible.
 
 ### 3. `.cs` and `.md` have no such limit
 
