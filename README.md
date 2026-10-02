@@ -223,12 +223,15 @@ dsh-guardian.exe rollback   pick a version, then roll back or set the target
 dsh-guardian.exe preview    show the rollback plan, writes nothing
 dsh-guardian.exe arm        start watching (runs with this window)
 dsh-guardian.exe disarm     stop watching
+dsh-guardian.exe on | off   same as arm | disarm
 dsh-guardian.exe shortcut   create the desktop shortcut (manual only)
 ```
 
 `dsh-snapshot.ps1` additionally accepts
 `-Action Create | List | Verify | Restore | Mark-Good | Promote`, plus `-DryRun`
-and `-Force`. `Restore` without `-Force` only prints what it would do.
+and `-Force`. **`-Action` defaults to `Create`**, so a bare run takes a snapshot
+rather than listing them; pass `-Action List` to look without writing.
+`Restore` without `-Force` only prints what it would do.
 
 ## Reporting a problem
 
@@ -261,10 +264,18 @@ docs\
 data\                              created at runtime, NOT in this repo
   mode.json / state.json / last-tick.json / last-known-good.json / runtime.pid
   watchdog.log / events.jsonl / exe-trace.log / child-stderr.log / menu-error.log
-  console\                           captured stdout+stderr from DSH launches
+  launch-captured-<stamp>-<pid>.cmd / .vbs   generated hidden-launch wrappers
+  console\                           captured stdout+stderr, one log per launch
   snapshots\                         snap-<stamp>-<label>\ and pre-restore-<stamp>\
   诊断报告\                           generated diagnostic reports
+_archive\<date>-pre-qc\            local backup taken before a quality pass
 ```
+
+Only the files listed for `app\` and `docs\` ship in the release ZIP. `data\`,
+`_archive\` and `DSH-Guardian-<version>.zip` are working-tree only — `data\` holds
+your local paths and plugin list, which is why `.gitignore` excludes it.
+`data\console\` stays empty until a launch actually goes through the wrapper, so
+an empty folder there is normal on a healthy install.
 
 ## Rebuilding
 
@@ -311,8 +322,15 @@ Both cost real debugging time. They are documented in full in
   reads BOM-less scripts with the system ANSI code page, so a Chinese literal in
   the source corrupts parsing. Chinese output is stored as UTF-8 hex and decoded
   at runtime.
-- **`.cmd` must be pure ASCII *and* CRLF.** `cmd.exe` decodes batch files with the
-  OEM code page, and a bare LF can make it read several lines as one.
+- **Generated `.cmd` and `.vbs` files must be written in the encoding their reader
+  honours** — *not* ASCII. The relaunch wrapper embeds your `data\` path, so
+  writing it as ASCII turns `D:\DS\崩溃回退\data` into `D:\DS\????\data`: `cmd.exe`
+  logs to a directory nobody reads and `wscript.exe` reports "cannot find the
+  path", while the empty `data\console\` is supposed to hold the crash evidence.
+  The `.cmd` therefore gets the console code page (ANSI normally, UTF-8+BOM under
+  `chcp 65001`; both cases measured), and the `.vbs` is written as UTF-16 LE with
+  a BOM, which WScript honours whatever the code page is. Both generators now
+  refuse to run rather than build a wrapper from a path containing `?`.
 
 ## License
 
