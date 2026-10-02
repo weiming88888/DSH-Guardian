@@ -912,6 +912,11 @@ if ("$Port|$portSource" -ne $lastPortLogged) {
 }
 
 $now = Get-Date
+# One stamp per round, at round scope. The rescue path used to rely on a $stamp
+# that only ever existed INSIDE functions, so at this level it was $null and the
+# evidence file came out as "crash-evidence-.json" -- a name the rescue record
+# then pointed at.
+$stamp = $now.ToString('yyyyMMdd-HHmmss')
 $alive = Test-PortAlive -TargetHost '127.0.0.1' -TargetPort $Port -TimeoutMs $ProbeTimeoutMs
 $procResult = Get-DshProcesses -Patterns $ProcessMatch
 $procs = @($procResult.Processes)
@@ -939,6 +944,20 @@ if (-not $state) {
 }
 
 $fpJson = ($fingerprint | ForEach-Object { $_ | ConvertTo-Json -Compress }) -join '|'
+
+# Guarantee every field this round may write exists on the object we parsed.
+# $state comes from ConvertFrom-Json, so an older state.json simply lacks the
+# newer fields, and assigning to a missing property THROWS instead of creating
+# it. Get-Prop already tolerates missing fields on read; this makes the write
+# side equally safe, so a stale state.json can never abort a rescue mid-round.
+foreach ($f in @('failStreak', 'shortLivedStarts', 'lastStartAt', 'lastStartWasHealthy',
+                 'lastNotifiedCrashLoop', 'launches', 'configFingerprint', 'autoRollbacks',
+                 'lastAutoRollbackAt', 'lastRescueFailSig', 'relaunchStopped')) {
+    if (-not $state.PSObject.Properties[$f]) { Set-Prop $state $f $null }
+}
+if ($null -eq $state.failStreak) { Set-Prop $state 'failStreak' 0 }
+if (-not $state.shortLivedStarts) { Set-Prop $state 'shortLivedStarts' 0 }
+if (-not $state.autoRollbacks) { Set-Prop $state 'autoRollbacks' 0 }
 
 # Cross-round guard: if the config plane has not moved since the last rollback,
 # we already rolled back for this exact configuration and it did not help.
@@ -1131,8 +1150,14 @@ if ($alive) {
                 # the rescue record file itself, so a caller-side copy was a
                 # write-only variable.
                 Invoke-AutoRollback -Pointer $pointer -State $state -Reason 'startup crash loop' | Out-Null
-                $state.autoRollbacks = [int]$rollbackCount + 1
-                $state.lastAutoRollbackAt = (Get-Date).ToString('o')
+                # Set-Prop, not $state.x = ... : on a real run whose state.json
+                # predates these fields (e.g. the very first rollback on an
+                # existing install) the property does not exist on the parsed
+                # object, and a direct assignment THROWS. That aborted the rest
+                # of the round -- no rescue record, no ROLLBACK event, no state
+                # save -- while the config plane had already been restored.
+                Set-Prop $state 'autoRollbacks' ([int]$rollbackCount + 1)
+                Set-Prop $state 'lastAutoRollbackAt' ((Get-Date).ToString('o'))
                 # The restored plane becomes the new baseline.
                 $state.configFingerprint = ((Get-ConfigFingerprint | ForEach-Object { $_ | ConvertTo-Json -Compress }) -join '|')
                 # Record the configuration this attempt RESULTED in, so the next
@@ -1144,7 +1169,7 @@ if ($alive) {
                 # after the restore) and so was never equal, which silently
                 # disabled the "never roll back the same configuration twice"
                 # guard -- only the MaxAutoRollbacks cap was left holding.
-                $state | Add-Member -NotePropertyName configFingerprintAtRollback -NotePropertyValue $state.configFingerprint -Force
+                Set-Prop $state 'configFingerprintAtRollback' $state.configFingerprint
                 $canAutoRollback = $false
             }
         } elseif ($AutoRollback -and -not $canAutoRollback) {
