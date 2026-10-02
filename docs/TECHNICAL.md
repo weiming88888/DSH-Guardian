@@ -153,7 +153,9 @@ The C# compiler and editors handle them as UTF-8. The Chinese menu in
 
 ## How a round works
 
-1. **Probe** - one TCP connect to `127.0.0.1:<Port>` (default 19387).
+1. **Probe** - one TCP connect to `127.0.0.1:<Port>`, where `<Port>` is resolved
+   every round (`Resolve-DshPort`): explicit `-Port` wins, else the live listening
+   port of a running DSH, else `data\port.txt`, else 3080. See below.
 2. **Healthy** - record the tick, clear failure state, done. Nothing else is
    touched: no process scan, no config fingerprint, no log reads.
 3. **Unhealthy** - fingerprint the config plane, then decide:
@@ -244,8 +246,12 @@ decoding `$ZH` entries - the script itself stays ASCII, as required above.
 ## Known limits
 
 - Granularity is "is the port answering", not in-process transient errors.
-- **The port is hard-coded to 19387.** Config default is 3080; a mismatch causes
-  false crash detection and repeated relaunches.
+- **The port is detected, not configured** (`Resolve-DshPort`). Order: explicit
+  `-Port`, then the live listening port of a DSH process, then `data\port.txt`,
+  then 3080. Detection needs the process to exist; when DSH is down the cached
+  file is what keeps the watcher pointed at the right port, so deleting
+  `data\port.txt` while DSH is already dead falls back to 3080 and can cause one
+  round of false crash detection. `-Port` remains the way to pin it.
 - The watcher only runs while its window is open. That is the price of "nothing
   runs unless I open it"; the two cannot both be satisfied.
 - Snapshot names are long; the menu trims the `snap-` prefix when displaying.
