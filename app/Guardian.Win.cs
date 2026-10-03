@@ -187,6 +187,32 @@ namespace GuardianGui
                 if (forwarded >= 0) { Environment.Exit(forwarded); }
             }
 
+            // "setting <0|1>" -- self test for the close-behaviour setting.
+            //
+            // Synthetic mouse clicks do not reach WinForms controls on this machine, so
+            // the one path that matters here (flip the checkbox while the guard is
+            // armed, which must rebuild the watcher immediately) cannot be exercised by
+            // clicking. This arms the guard and then flips the box, which is the same
+            // code the checkbox handler runs.
+            if (args != null && args.Length > 1
+                && args[0].TrimStart('-', '/').Equals("setting", StringComparison.OrdinalIgnoreCase))
+            {
+                bool want = args[1] == "1";
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                MainForm mf2 = new MainForm();
+                Timer t3 = new Timer();
+                t3.Interval = MainForm.StartupTestDelayMs;
+                t3.Tick += delegate
+                {
+                    t3.Stop();
+                    mf2.RunSettingTest(want);
+                };
+                t3.Start();
+                Application.Run(mf2);
+                return;
+            }
+
             // "click <n>" runs action <n> shortly after startup: same code path a
             // button click takes, with no mouse involved.
             if (args != null && args.Length > 1
@@ -480,10 +506,24 @@ namespace GuardianGui
             keepBox.CheckedChanged += delegate
             {
                 KeepWatchingAfterClose = keepBox.Checked;
+                // Apply it NOW, not at the next arm.
+                //
+                // The watcher's binding is fixed when it starts, so a setting that only
+                // takes effect later means the window can describe one behaviour while
+                // the running process does another -- which is exactly how "关窗即停"
+                // came to be reported as broken. Rebuilding the watcher on the spot
+                // costs a couple of seconds and removes the whole class of mismatch.
+                if (Armed)
+                {
+                    Append(T("\u6B63\u5728\u6309\u65B0\u8BBE\u7F6E\u91CD\u5EFA\u76D1\u89C6\u5668\u2026"));
+                    Application.DoEvents();
+                    Disarm();
+                    Arm();
+                }
                 UpdateStatus();
                 Append(keepBox.Checked
-                    ? T("\u5DF2\u8BBE\u4E3A\uFF1A\u5173\u7A97\u53E3\u540E\u7EE7\u7EED\u76D1\u89C6\u3002\u4E0B\u6B21\u70B9\u300C\u5F00\u5173\u76D1\u89C6\u300D\u751F\u6548\u3002")
-                    : T("\u5DF2\u8BBE\u4E3A\uFF1A\u5173\u7A97\u53E3\u5373\u505C\u6B62\u76D1\u89C6\u3002\u4E0B\u6B21\u70B9\u300C\u5F00\u5173\u76D1\u89C6\u300D\u751F\u6548\u3002"));
+                    ? T("\u5DF2\u751F\u6548\uFF1A\u5173\u7A97\u540E\u7EE7\u7EED\u76D1\u89C6\u3002\u60F3\u505C\u5C31\u91CD\u5F00\u7A97\u53E3\u70B9\u300C\u5F00\u5173\u76D1\u89C6\u300D\u3002")
+                    : T("\u5DF2\u751F\u6548\uFF1A\u5173\u7A97\u53E3\u5373\u505C\u6B62\u76D1\u89C6\u3002"));
             };
             actions.Controls.Add(keepBox);
 
@@ -1284,7 +1324,11 @@ namespace GuardianGui
                     : T("   \u2014\u2014 \u5173\u7A97\u540E\u7EE7\u7EED\u76D1\u89C6");
                 if (WatcherIsParentBound == KeepWatchingAfterClose)
                 {
-                    statusLine.Text += T("\uFF08\u8BBE\u7F6E\u5DF2\u6539\uFF0C\u4E0B\u6B21\u70B9\u300C\u5F00\u5173\u76D1\u89C6\u300D\u751F\u6548\uFF09");
+                    // Should not happen through the interface any more -- ticking the box
+                    // rebuilds the watcher immediately. It can still happen if the
+                    // settings file is edited while the window is open, so it is reported
+                    // as a mismatch to clear rather than as a normal step.
+                    statusLine.Text += T("\uFF08\u8BBE\u7F6E\u4E0E\u8FD0\u884C\u4E2D\u7684\u76D1\u89C6\u5668\u4E0D\u4E00\u81F4\uFF0C\u70B9\u4E00\u6B21\u300C\u5F00\u5173\u76D1\u89C6\u300D\u91CD\u65B0\u5BF9\u9F50\uFF09");
                 }
             }
 
@@ -1353,6 +1397,21 @@ namespace GuardianGui
         }
 
         // ---- actions ----------------------------------------------------------
+        // Self-test entry for the close-behaviour setting: arm, then flip the box.
+        // Exists because the checkbox cannot be clicked from a script on this machine.
+        internal void RunSettingTest(bool want)
+        {
+            try
+            {
+                ClickLog("setting test: arming");
+                RunActionForTest(1);
+                if (keepBox != null) { keepBox.Checked = want; }
+                ClickLog("setting test: keepWatchingAfterClose=" + want
+                    + "  parentBound=" + WatcherIsParentBound);
+            }
+            catch (Exception ex) { Program.CrashLog("setting test", ex); }
+        }
+
         private void RunSelected(int i)
         {
             if (i < 0) { return; }

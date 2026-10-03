@@ -83,7 +83,7 @@ window shows `● 监视中` until you click 开关监视 to stop it.
 > The two behaviours cannot both hold, which is why this is a setting rather than a
 > default: the default is "closing stops it", because that is what makes the sentence
 > above true. Turn it on when you need to watch something for a long time.
-> Stored in `data\gui-settings.json`; takes effect the **next** time you click 开关监视.
+> Stored in `data\gui-settings.json`, and applied **immediately**: changing it while monitoring rebuilds the watcher on the spot, so you never have to re-arm by hand.
 
 
 ## What happens when a plugin breaks DSH
