@@ -448,6 +448,12 @@ internal static class Guardian
     //   MinConsoleBufferHeight  the scrollback the console build keeps available
     private const int MinConsoleBufferHeight = 400;
 
+    // True while this process is the watcher (watch-loop). Every message box in this exe
+    // is behind this flag: a watcher runs unattended for hours, so a dialog is not a
+    // notification, it is a hang -- it blocks the loop until somebody notices a window
+    // they never asked for. Non-interactive runs report to the log instead.
+    private static bool NoDialogs = false;
+
     private static string BaseDir
     {
         get { return Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location); }
@@ -629,6 +635,16 @@ internal static class Guardian
     {
         string verb = (args != null && args.Length > 0) ? args[0].TrimStart('-', '/').ToLowerInvariant() : null;
 
+        // Silence every message box for the watcher, and do it HERE.
+        //
+        // The path check further down raises an error dialog when the scripts are
+        // missing, and it runs before the verb switch -- so setting this flag inside
+        // `case "watch-loop"` would be too late and the dialog would already be on
+        // screen. A watcher is unattended by definition; a modal box it raises is not a
+        // notification, it is a hang: the loop waits behind it for a click that never
+        // comes, and monitoring stops without a word.
+        NoDialogs = verb == "watch-loop";
+
         // -Quiet is passed by the GUI shell when it runs the version picker here:
         // this process manipulates state and shows its own dialogs, and must not
         // leave a console window sitting behind the GUI window.
@@ -678,13 +694,23 @@ internal static class Guardian
         {
             Say("FATAL: dsh-watchdog.ps1 / dsh-snapshot.ps1 not found next to this exe.");
             Say("       expected in: " + BaseDir);
-            try
+            // No dialog when this process is (or is about to become) the watcher.
+            //
+            // This exe hosts watch-loop, which stays up for hours with nobody in front of
+            // it. A modal box raised here would sit there undismissed and the loop would
+            // never start -- monitoring stopped, silently, because of a dialog nobody
+            // asked for and nobody can see fit to close. The condition is already reported
+            // above and in the log; a window adds nothing an absent user can act on.
+            if (!NoDialogs)
             {
-                MessageBoxW(IntPtr.Zero,
-                    "dsh-watchdog.ps1 / dsh-snapshot.ps1 were not found next to this exe.\n\nExpected in:\n" + BaseDir,
-                    "DSH Guardian", MB_OK | MB_ICONERROR);
+                try
+                {
+                    MessageBoxW(IntPtr.Zero,
+                        "dsh-watchdog.ps1 / dsh-snapshot.ps1 were not found next to this exe.\n\nExpected in:\n" + BaseDir,
+                        "DSH Guardian", MB_OK | MB_ICONERROR);
+                }
+                catch { }
             }
-            catch { }
             return 2;
         }
 
