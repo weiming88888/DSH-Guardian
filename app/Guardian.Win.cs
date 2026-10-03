@@ -325,12 +325,21 @@ namespace GuardianGui
         //                       TWO lines (the second one wraps), which a 44px row did
         //                       not -- the second line was drawn into the button row.
         internal const int StatusRefreshMs = 2000;
+        // Undetermined states are polled fast, settled ones slowly.
+        //
+        // The window's answer to "is anything watching" has to arrive before the user
+        // acts on it. A fixed 2s poll let the display lag the truth by up to two seconds
+        // on every transition, and while the state is still unknown that lag IS the
+        // problem; once it is settled there is nothing to poll for. The watcher claims
+        // its pid file in one to two seconds, so a 400ms poll resolves the question
+        // almost as soon as there is an answer to give.
+        internal const int StatusFastRefreshMs = 400;
         internal const int StartupTestDelayMs = 1200;
         // How long "armed but no watcher yet" may last before the window calls it a
-        // failure. A PowerShell cold start plus the watcher claiming its pid file takes
-        // one to three seconds; 15 leaves room for a loaded machine without leaving the
-        // user staring at "启动中…" for a watcher that is never coming.
-        internal const int WatcherStartGraceSeconds = 15;
+        // failure. Measured: the watcher claims its pid file in about a second, two on a
+        // cold PowerShell start. Five seconds is several times that, and still short
+        // enough that nobody stands in front of the window wondering.
+        internal const int WatcherStartGraceSeconds = 5;
         internal const int StatusRowPx = 48;
         internal const int DetailRowPx = 72;
         internal const int ActionRowPx = 52;
@@ -378,7 +387,8 @@ namespace GuardianGui
             BuildUi();
             Refresh4();
             ticker = new Timer();
-            ticker.Interval = StatusRefreshMs;
+            // Start fast: the first status is the one the user is waiting for.
+            ticker.Interval = StatusFastRefreshMs;
             ticker.Tick += delegate { Refresh4(); };
             ticker.Start();
         }
@@ -1176,7 +1186,10 @@ namespace GuardianGui
             }
             else if (pid > 0)
             {
-                statusLine.Text = T("\u25CF \u76D1\u89C6\u4E2D");
+                // The pid is part of the answer, not decoration: it is what lets the user
+                // (or a support thread) confirm that the process they see in Task Manager
+                // is the one this window is talking about.
+                statusLine.Text = T("\u25CF \u76D1\u89C6\u4E2D\uFF08\u8FDB\u7A0B ") + pid + T("\uFF09");
                 statusLine.ForeColor = Theme.Ok;
             }
             else
@@ -1207,12 +1220,33 @@ namespace GuardianGui
                 else
                 {
                     // Start the clock the first time this state is seen, so a slow start
-                    // is tolerated and a dead one is eventually reported.
-                    if (armedNoPidSince == DateTime.MinValue) { armedNoPidSince = DateTime.Now; }
-                    statusLine.Text = T("\u25D0 \u5DF2\u5F00\u542F\uFF0C\u76D1\u89C6\u5668\u542F\u52A8\u4E2D\u2026");
+                    // is tolerated and a dead one is reported as soon as the measurement
+                    // says it cannot still be starting.
+                    if (armedNoPidSince == DateTime.MinValue)
+                    {
+                        armedNoPidSince = DateTime.Now;
+                        ClickLog("watcher: armed, waiting for runtime.pid");
+                    }
+                    int waited = (int)(DateTime.Now - armedNoPidSince).TotalSeconds;
+                    statusLine.Text = T("\u25D0 \u6B63\u5728\u542F\u52A8\u76D1\u89C6\u5668\u2026 ")
+                        + waited + T(" \u79D2");
                     statusLine.ForeColor = Theme.Warn;
                 }
             }
+
+            // Poll fast whenever the answer can still change, slowly when it cannot.
+            //
+            // "Armed" is never a settled state: the watcher can die at any moment, and
+            // the window is the only thing that would tell the user. Only a disarmed
+            // window has nothing left to report, so that is the one case worth polling
+            // slowly. A few small file reads plus one process lookup at 400ms costs
+            // nothing measurable and turns "it died a moment ago" into "it died".
+            try
+            {
+                int want = armed ? StatusFastRefreshMs : StatusRefreshMs;
+                if (ticker != null && ticker.Interval != want) { ticker.Interval = want; }
+            }
+            catch { }
 
             // Record the status line whenever it changes.
             //
