@@ -99,7 +99,7 @@
 | 按钮 | 点了会发生什么 | 失败时看哪里 |
 |---|---|---|
 | **打基线** | 运行 `dsh-snapshot.ps1 -Action Mark-Good`，新建 `data\snapshots\snap-<日期时间>-known-good\`（6 个配置文件），并把它设为**回退目标**。旧快照**永不删除、永不覆盖** | 执行结果区的原始输出；`data\snapshots\` 是否出现新目录 |
-| **开关监视** | 开 → 启动监视器（`dsh-watchdog.ps1 -Resident -AutoRollback`）；关 → 写暂停标记并结束它 | 状态行若长期停在「启动中…」，看「日志」和 `data\exe-trace.log` |
+| **开关监视** | 开 → 启动监视器（`dsh-guardian-console.exe watch-loop`，每 55 秒起一轮 `dsh-watchdog.ps1`）；关 → 写暂停标记并结束它 | 状态行若长期停在「启动中…」，看「日志」和 `data\exe-trace.log` |
 | **回退** | 打开**版本选择对话框**（见第五节） | 对话框内的提示；`data\watchdog.log` |
 | **日志** | 在执行结果区显示 `data\watchdog.log` 的**末尾 40 行**，并在前面说明这份日志是什么、怎么看 | 日志文件不存在时也会说明它本该在哪 |
 | **目录** | 打开**内置文件浏览器**（见第五节） | 预览区会写"文件不存在"或"无法读取" |

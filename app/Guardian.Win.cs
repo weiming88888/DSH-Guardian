@@ -371,6 +371,9 @@ namespace GuardianGui
         // arming action finishes before the status line declares a failure.
         internal const int WatcherPidWaitTries = 20;
         internal const int WatcherPidWaitMs = 300;
+        // How often the C# watch-loop runs one round of the watchdog. Matches the
+        // PowerShell default it replaced, so the documented 55s cadence is unchanged.
+        internal const int WatchIntervalSeconds = 55;
         internal const int StatusRowPx = 48;
         internal const int DetailRowPx = 72;
         internal const int ActionRowPx = 52;
@@ -388,6 +391,9 @@ namespace GuardianGui
         private readonly string SnapshotPath;
 
         private readonly string PsExe;
+
+        // dsh-guardian-console.exe -- hosts the resident watch loop (see watch-loop).
+        private readonly string LoopExe;
 
         // ---- controls --------------------------------------------------------
         private Label detailLine;
@@ -413,6 +419,7 @@ namespace GuardianGui
             DataDir = Path.Combine(Path.GetDirectoryName(BaseDir), "data");
             WatchdogPath = Path.Combine(BaseDir, "dsh-watchdog.ps1");
             SnapshotPath = Path.Combine(BaseDir, "dsh-snapshot.ps1");
+            LoopExe = Path.Combine(BaseDir, "dsh-guardian-console.exe");
             PsExe = FindPowerShell();
 
             BuildUi();
@@ -1083,18 +1090,10 @@ namespace GuardianGui
 
 
         private static string T2(string s) { return s; }
-        private Button MakeButton(string text, int x)
-        {
-            Button b = new Button();
-            b.Text = text;
-            b.Left = 12 + x;
-            b.Top = 8;
-            b.Width = 88;
-            b.Height = 30;
-            b.FlatStyle = FlatStyle.System;
-            return b;
-        }
 
+        // MakeButton() used to sit here: the first button bar, with fixed 88x30 sizes and
+        // hard-coded left offsets. Buttons are built by the action zone now and sized to
+        // their own text, which is what stopped the labels being cut off.
         private static Font PickFont()
         {
             try
@@ -1451,25 +1450,20 @@ namespace GuardianGui
             try
             {
                 ProcessStartInfo psi = new ProcessStartInfo();
-                psi.FileName = PsExe;
-                // -ParentPid ties the watcher's life to this window: when the process
-                // exits the watcher stops (dsh-watchdog.ps1 -> 'launcher closed'). That
-                // is the default because it is what makes "nothing keeps running behind
-                // your back" true.
-                //
-                // The binding is omitted when the user has turned on
-                // 「关闭窗口后继续监视」. Then the window really is just a window: the
-                // watcher keeps its own life and is stopped from the界面 or from
-                // data\mode.json. The tradeoff is stated on the setting itself rather
-                // than hidden, because the two behaviours cannot both be true.
-                psi.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""
-                    + WatchdogPath + "\" -DataDir \"" + DataDir + "\" -Silent -AutoRollback -Resident"
-                    + " -Mode auto"
+                // The resident watcher is now this project's own C# code, not a
+                // long-lived PowerShell. Hosting the loop in PowerShell meant holding
+                // ~139 MB for hours so a probe could run once a minute; the same loop in
+                // watch-loop holds a few MB and starts PowerShell only for the round
+                // itself. The decision logic and the rollback are unchanged -- they are
+                // still dsh-watchdog.ps1 / dsh-snapshot.ps1.
+                psi.FileName = LoopExe;
+                psi.Arguments = "watch-loop"
+                    + " -IntervalSeconds " + WatchIntervalSeconds
                     + (KeepWatchingAfterClose
                         ? ""
                         // The start time goes with the pid: Windows recycles pids, and a
-                        // recycled one makes the binding look alive forever, so the
-                        // watcher outlives the window it was told to follow.
+                        // recycled one makes the binding look alive forever, so the loop
+                        // outlives the window it was told to follow.
                         : " -ParentPid " + Process.GetCurrentProcess().Id
                           + " -ParentStartTicks " + Process.GetCurrentProcess().StartTime.Ticks);
                 // Record what was actually used, so the window can tell the truth about
@@ -1986,33 +1980,10 @@ namespace GuardianGui
             return fail == 0 ? 0 : 1;
         }
 
-        private string RunForTest(string script, string args)
-        {
-            StringBuilder sb = new StringBuilder();
-            try
-            {
-                ProcessStartInfo psi = new ProcessStartInfo();
-                psi.FileName = PsExe;
-                psi.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""
-                    + script + "\" -DataDir \"" + DataDir + "\" " + args;
-                psi.UseShellExecute = false;
-                psi.CreateNoWindow = true;
-                psi.RedirectStandardOutput = true;
-                psi.RedirectStandardError = true;
-                psi.StandardOutputEncoding = Encoding.UTF8;
-                psi.StandardErrorEncoding = Encoding.UTF8;
-                Process p = Process.Start(psi);
-                string err = p.StandardError.ReadToEnd();
-                string outp = p.StandardOutput.ReadToEnd();
-                p.WaitForExit();
-                sb.AppendLine("exit=" + p.ExitCode);
-                if (outp != null && outp.Trim().Length > 0) { sb.AppendLine(outp.TrimEnd()); }
-                if (err != null && err.Trim().Length > 0) { sb.AppendLine("STDERR: " + err.TrimEnd()); }
-            }
-            catch (Exception ex) { sb.AppendLine("threw: " + ex.Message); }
-            return sb.ToString();
-        }
-
+        // RunForTest() used to sit here: a second copy of RunScript that also captured
+        // stdout/stderr into a string. It was written for the --selftest harness and then
+        // superseded by RunScript + the per-action self-test, leaving no callers. Two
+        // functions that both "run the watchdog" is how the two drift apart.
         private void Append(string text)
         {
             if (text == null) { return; }

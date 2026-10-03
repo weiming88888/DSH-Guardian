@@ -204,8 +204,10 @@ internal static class Guardian
         catch { VtOk = false; }
     }
 
-    private static string Col(string text, ConsoleColor c) { return text; }
-    private static string Inv(string text) { return text; }
+    // Col() and Inv() used to sit here. Both were no-ops that returned their argument
+    // unchanged -- leftovers from the ANSI-escape revision, kept "in case" the console
+    // colour work came back. Nothing called them, and a function whose entire body is
+    // "return text" is a place where a reader expects behaviour to be happening.
 
     // ------------------------------------------------------- atomic row drawing
     //
@@ -275,26 +277,10 @@ internal static class Guardian
         public short Left; public short Top; public short Right; public short Bottom;
     }
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool SetConsoleWindowInfo(IntPtr h, bool absolute, ref SMALL_RECT rect);
-
     // DrawRow writes into the buffer at fixed coordinates but does not move the
     // viewport, so once the console had scrolled (startup output, an action) the
-    // frame was drawn above the visible area and the top of the menu stayed cut
-    // off. Scrolling the window back to row 0 is what actually pins it.
-    private static void ScrollTop()
-    {
-        if (ConsoleOut == IntPtr.Zero) { return; }
-        try
-        {
-            int h = 25;
-            try { h = Console.WindowHeight; } catch { }
-            SMALL_RECT r = new SMALL_RECT();
-            r.Left = 0; r.Top = 0; r.Right = 120; r.Bottom = (short)(h - 1);
-            SetConsoleWindowInfo(ConsoleOut, true, ref r);
-        }
-        catch { }
-    }
+    // frame was drawn above the visible area. HomeCursor is what pins it now;
+    // ScrollTop did the same job through SetConsoleWindowInfo and had no callers left.
     private static void HomeCursor()
     {
         if (ConsoleOut == IntPtr.Zero) { return; }
@@ -378,9 +364,14 @@ internal static class Guardian
         catch { }
     }
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetConsoleWindowInfo(IntPtr h, bool absolute, ref SMALL_RECT rect);
+
     // Scrolls the visible window so its top row is buffer row 0. Drawing targets
     // absolute buffer rows, so without this the menu can be written above the
     // visible area and the top of the frame is cut off.
+    //
+    // ScrollTop() used to sit next to this with a byte-identical body and no callers.
     private static void PinViewTop()
     {
         if (ConsoleOut == IntPtr.Zero) { return; }
@@ -411,28 +402,10 @@ internal static class Guardian
     }
 
 
-    // Writes one composed frame in a single call. No Clear: the frame is drawn
-    // from a fixed origin and every line is padded to the full width, so anything
-    // left over from a previous frame is overwritten.
-    private static void WriteFrame(string frame)
-    {
-        try
-        {
-            Console.SetCursorPosition(0, 0);
-        }
-        catch { }
-        if (ConsoleOut != IntPtr.Zero)
-        {
-            try
-            {
-                uint written;
-                WriteConsoleW(ConsoleOut, frame, (uint)frame.Length, out written, IntPtr.Zero);
-                return;
-            }
-            catch { }
-        }
-        try { Console.Write(frame); } catch { }
-    }
+    // WriteFrame() used to sit here, writing one composed frame through a single
+    // WriteConsoleW call. The frame renderer draws row by row through DrawRow now
+    // (one row of characters, then one row of attributes), so the whole-frame path
+    // had no callers. WriteConsoleW is still declared: DrawRow uses it.
     private const ushort MOUSE_EVENT = 0x0002;
     private const uint MOUSE_MOVED = 0x0001;
     private const uint FROM_LEFT_1ST_BUTTON_PRESSED = 0x0001;
@@ -572,10 +545,8 @@ internal static class Guardian
         }
     }
 
-    private static void SayRule(int width, ConsoleColor color)
-    {
-        Say(new string('-', Math.Max(20, width)), color);
-    }
+    // SayRule() used to sit here, drawing a run of dashes. The frame renderer took over
+    // every rule in the layout and nothing called it any more.
 
     // Say() ends the line, which is wrong for the left half of a label/value
     // pair: the first version used it for both halves and every row came out as
@@ -606,12 +577,10 @@ internal static class Guardian
     // colon before the value, which wrapped as soon as the value was long
     // ("20261002-230811-post-qc-clean" alone is 28 columns) and left the colon
     // stranded on its own line. Width is budgeted instead: label 10 + value 60.
-    private static void SayRow(string label, string value, ConsoleColor valueColor)
-    {
-        SayPart("  ");
-        SayPart(label.PadRight(10));
-        Say(value, valueColor);
-    }
+    //
+    // The SayRow() helper that came out of that revision was replaced by the frame
+    // renderer; this comment is kept because it explains the column budget the
+    // renderer still uses.
 
     // Snapshot names are long and the tail ("-known-good") is the informative
     // part, so short strings are kept whole and long ones are trimmed in the
@@ -791,6 +760,8 @@ internal static class Guardian
             case "off": return Arm(false);
             case "shortcut": ForceShortcut(); return 0;
             case "probe": return ConsoleProbe();
+            // The resident watcher, hosted in C# instead of in a long-lived PowerShell.
+            case "watch-loop": return WatchLoop(args);
             // Runs the diagnostic collector through the exe rather than through the
             // .cmd wrapper, so the desktop shortcut can point at THIS executable.
             //
@@ -1994,6 +1965,330 @@ internal static class Guardian
     private static int Exec(string script, string scriptArgs)
     {
         return Exec(script, scriptArgs, false);
+    }
+
+    // ---------------------------------------------------------------- watch-loop
+    //
+    // The resident watcher used to BE a long-lived PowerShell process: ~139 MB held for
+    // hours so that a probe could run every 55 seconds. The loop below keeps the same
+    // cadence in this process (a few MB) and starts PowerShell only for the round
+    // itself, which lives one or two seconds and then exits. The decision logic and the
+    // rollback stay in dsh-watchdog.ps1 / dsh-snapshot.ps1, untouched -- only the thing
+    // that stays resident changed.
+    //
+    // The log lines deliberately match the PowerShell version word for word
+    // ("resident: started/exiting/stopped"), because docs\LOG.md documents them.
+    private static int WatchLoop(string[] args)
+    {
+        int interval = ArgNum(args, "-IntervalSeconds", 55);
+        int parentPid = ArgNum(args, "-ParentPid", 0);
+        long parentTicks = ArgNumLong(args, "-ParentStartTicks", 0);
+        int maxMinutes = ArgNum(args, "-MaxResidentMinutes", 240);
+        // Extra parameters forwarded to every round. The GUI passes none, but the
+        // sandbox QC has to drive the same loop with a short boot window and a lower
+        // crash threshold, and users tuning the guard need the same door. Without it the
+        // loop's round arguments are frozen in code and cannot be exercised by a test.
+        string roundArgs = ArgText(args, "-RoundArgs");
+        // Same thing, but read from a file. Passed on the command line the value would
+        // need its own quoting, and the parameters a caller wants to forward already
+        // contain quoted values (-LaunchCommand is a whole command line), so the two
+        // levels of quotes collide. The sandbox QC hit exactly that. A file has no
+        // quoting rules to get wrong.
+        if (roundArgs.Length == 0)
+        {
+            string f = ArgText(args, "-RoundArgsFile");
+            if (f.Length > 0)
+            {
+                try { roundArgs = File.ReadAllText(f).Trim(); }
+                catch (Exception ex) { WatchLog("watch-loop: cannot read " + f + ": " + ex.Message); }
+            }
+        }
+
+        string pidFile = Path.Combine(DataDir, "runtime.pid");
+        int me = Process.GetCurrentProcess().Id;
+        string parentNote = parentPid > 0 ? "parent " + parentPid : "no parent binding";
+
+        try
+        {
+            Directory.CreateDirectory(DataDir);
+            File.WriteAllText(pidFile, me.ToString(), new UTF8Encoding(false));
+            WatchLog("resident: started (pid " + me + ", " + parentNote
+                + ", interval " + interval + "s, max " + maxMinutes + " min)");
+        }
+        catch (Exception ex)
+        {
+            WatchLog("resident: cannot claim the pid file: " + ex.Message);
+            return 4;
+        }
+
+        DateTime deadline = DateTime.Now.AddMinutes(maxMinutes);
+        int rounds = 0;
+        int failedRounds = 0;
+        string exitReason = null;
+
+        try
+        {
+            while (true)
+            {
+                rounds++;
+
+                // One round of the real watcher, bounded: see RunRoundBounded for why
+                // Exec() must not be used inside the loop.
+                int rc = RunRoundBounded(WatchdogPath, "-Silent -AutoRollback -Mode auto"
+                    + (roundArgs.Length > 0 ? " " + roundArgs : ""), RoundTimeoutSeconds);
+
+                // A round that cannot run must never be silent.
+                //
+                // Measured failure: a duplicated -AutoRollback made PowerShell refuse to
+                // bind its parameters. Every round died in under a second, the loop kept
+                // looping, and the window went on saying 监视中 -- the guard was not
+                // watching anything and nothing said so. The exit code is the only signal
+                // that distinguishes "watched and found nothing" from "never watched".
+                if (rc != 0)
+                {
+                    failedRounds++;
+                    WatchLog("round: failed (exit " + rc + ", " + failedRounds + " in a row)");
+                    if (failedRounds == FailedRoundsBeforeAlert)
+                    {
+                        WatchLog("ALERT: " + FailedRoundsBeforeAlert
+                            + " rounds in a row failed to run; nothing is being watched."
+                            + " See data\\child-output.log for the reason.");
+                    }
+                }
+                else { failedRounds = 0; }
+                if (rounds == 1) { WatchLog("resident: first round done"); }
+
+                if (ModeIsPaused()) { exitReason = "disarmed"; break; }
+                if (ParentGone(parentPid, parentTicks)) { exitReason = "launcher closed"; break; }
+                if (DateTime.Now >= deadline) { exitReason = "lifetime cap reached"; break; }
+
+                // Sleep out the interval, but stay responsive to the two things that
+                // must stop the loop promptly: the user disarming, and the window that
+                // asked for this closing.
+                DateTime woke = DateTime.Now;
+                while ((DateTime.Now - woke).TotalSeconds < interval)
+                {
+                    System.Threading.Thread.Sleep(WatchIntervalCheckMs);
+                    if (ModeIsPaused()) { exitReason = "disarmed"; break; }
+                    if (ParentGone(parentPid, parentTicks)) { exitReason = "launcher closed"; break; }
+                }
+                if (exitReason != null) { break; }
+            }
+        }
+        catch (Exception ex)
+        {
+            exitReason = "threw " + ex.GetType().Name;
+            WatchLog("resident: " + exitReason + ": " + ex.Message);
+        }
+        finally
+        {
+            // Only remove the pid file if it still names us: another instance may have
+            // taken the slot, and deleting its file would orphan it.
+            try
+            {
+                if (File.Exists(pidFile)
+                    && File.ReadAllText(pidFile).Trim() == me.ToString())
+                {
+                    File.Delete(pidFile);
+                }
+            }
+            catch { }
+        }
+
+        if (exitReason != null) { WatchLog("resident: exiting (" + exitReason + ")"); }
+        WatchLog("resident: stopped after " + rounds + " round(s)");
+        return 0;
+    }
+
+    // How often the sleep between rounds re-checks the exit conditions. Matches the
+    // PowerShell loop's own 3s cadence so "closing the window stops it" feels the same.
+    private const int WatchIntervalCheckMs = 3000;
+
+    // Budget for one round. The watchdog's own boot window can be 90s, and a round that
+    // waits one out is legitimate, so this is generous -- it exists to stop a wedged
+    // child, not to hurry a working one.
+    private const int RoundTimeoutSeconds = 180;
+
+    // Consecutive failed rounds before the log says out loud that nothing is being
+    // watched. Three is enough to rule out a one-off while still being prompt.
+    private const int FailedRoundsBeforeAlert = 3;
+
+    private static void WatchLog(string message)
+    {
+        try
+        {
+            Directory.CreateDirectory(DataDir);
+            File.AppendAllText(Path.Combine(DataDir, "watchdog.log"),
+                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " [INFO] " + message + Environment.NewLine,
+                new UTF8Encoding(false));
+        }
+        catch { }
+    }
+
+    // Tolerant on purpose: mode.json is written by two other components, and a strict
+    // match against "mode":"paused" would treat a spaced file as "not paused" -- which
+    // fails in the dangerous direction, since it means the watcher keeps running.
+    private static bool ModeIsPaused()
+    {
+        try
+        {
+            string p = Path.Combine(DataDir, "mode.json");
+            if (!File.Exists(p)) { return false; }
+            string s = File.ReadAllText(p);
+            int i = s.IndexOf("\"mode\"", StringComparison.Ordinal);
+            if (i < 0) { return false; }
+            i = s.IndexOf(':', i);
+            if (i < 0) { return false; }
+            int a = s.IndexOf('"', i);
+            if (a < 0) { return false; }
+            int b = s.IndexOf('"', a + 1);
+            if (b < 0) { return false; }
+            return s.Substring(a + 1, b - a - 1).Trim()
+                .Equals("paused", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
+
+    // A pid on its own is not proof the launcher is alive: Windows recycles pids, and a
+    // recycled one made the PowerShell side keep running after its window had gone.
+    // The start time travels with the pid for exactly that reason.
+    private static bool ParentGone(int pid, long startTicks)
+    {
+        if (pid <= 0) { return false; }
+        try
+        {
+            Process p = Process.GetProcessById(pid);
+            if (startTicks > 0)
+            {
+                try
+                {
+                    long delta = Math.Abs(p.StartTime.Ticks - startTicks);
+                    if (delta > TimeSpan.FromSeconds(2).Ticks) { return true; }
+                }
+                catch { }
+            }
+            return false;
+        }
+        catch { return true; }
+    }
+
+    // One round, bounded in time and safe against pipe deadlock.
+    //
+    // Exec() cannot be used here. It reads the child's stderr to EOF and only then its
+    // stdout; a child that fills the stdout pipe buffer blocks writing while the parent
+    // blocks reading stderr, so both wait forever. Exec() also waits without a timeout.
+    // In the CLI that merely hangs the one command the user ran; inside watch-loop it
+    // hangs the LOOP, and the failure is silent -- the window still says 监视中 while
+    // nothing is being watched. Measured: R3 rollback never fired because round 2 never
+    // returned.
+    //
+    // So: both streams are drained concurrently, and the child is killed if it outstays
+    // its budget. A round that cannot finish is a fact worth logging, not a reason to
+    // stop watching.
+    private static int RunRoundBounded(string script, string scriptArgs, int timeoutSeconds)
+    {
+        Process p = null;
+        try
+        {
+            ProcessStartInfo psi = new ProcessStartInfo();
+            psi.FileName = PsExe();
+            psi.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""
+                + script + "\" -DataDir \"" + DataDir + "\" " + scriptArgs;
+            psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            psi.WindowStyle = ProcessWindowStyle.Hidden;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+            p = Process.Start(psi);
+
+            // Drain both pipes at once. Reading them in sequence is the deadlock.
+            System.Threading.Tasks.Task<string> outTask =
+                System.Threading.Tasks.Task.Factory.StartNew(delegate { return p.StandardOutput.ReadToEnd(); });
+            System.Threading.Tasks.Task<string> errTask =
+                System.Threading.Tasks.Task.Factory.StartNew(delegate { return p.StandardError.ReadToEnd(); });
+
+            bool exited = p.WaitForExit(timeoutSeconds * 1000);
+            if (!exited)
+            {
+                WatchLog("round: exceeded " + timeoutSeconds + "s, killing the child");
+                try { p.Kill(); } catch { }
+                try { p.WaitForExit(5000); } catch { }
+            }
+
+            string outp = null, err = null;
+            try { outp = outTask.Result; } catch { }
+            try { err = errTask.Result; } catch { }
+
+            string merged = ((outp ?? "") + (err ?? "")).Trim();
+            if (merged.Length > 0)
+            {
+                try
+                {
+                    File.AppendAllText(Path.Combine(DataDir, "child-output.log"),
+                        DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  " +
+                        Path.GetFileName(script) + " " + scriptArgs + Environment.NewLine +
+                        merged + Environment.NewLine, new UTF8Encoding(false));
+                }
+                catch { }
+            }
+            return exited ? p.ExitCode : 5;
+        }
+        catch (Exception ex)
+        {
+            WatchLog("round: failed to run: " + ex.Message);
+            return 3;
+        }
+        finally
+        {
+            try { if (p != null) { p.Dispose(); } } catch { }
+        }
+    }
+
+    private static int ArgNum(string[] args, string name, int fallback)
+    {
+        try
+        {
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i].Equals(name, StringComparison.OrdinalIgnoreCase))
+                {
+                    int v;
+                    if (int.TryParse(args[i + 1], out v)) { return v; }
+                }
+            }
+        }
+        catch { }
+        return fallback;
+    }
+
+    // Free-text parameter (a whole argument list, not a number).
+    private static string ArgText(string[] args, string name)
+    {
+        try
+        {
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i].Equals(name, StringComparison.OrdinalIgnoreCase)) { return args[i + 1]; }
+            }
+        }
+        catch { }
+        return "";
+    }
+
+    private static long ArgNumLong(string[] args, string name, long fallback)    {
+        try
+        {
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i].Equals(name, StringComparison.OrdinalIgnoreCase))
+                {
+                    long v;
+                    if (long.TryParse(args[i + 1], out v)) { return v; }
+                }
+            }
+        }
+        catch { }
+        return fallback;
     }
 
     // quietChild: hide the child console entirely (used by the resident watcher).
