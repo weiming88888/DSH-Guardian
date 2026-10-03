@@ -643,15 +643,33 @@ internal static class Guardian
         // screen. A watcher is unattended by definition; a modal box it raises is not a
         // notification, it is a hang: the loop waits behind it for a click that never
         // comes, and monitoring stops without a word.
-        NoDialogs = verb == "watch-loop";
+        //
+        // The console window is the OTHER half of the same problem, and it was the one
+        // actually being reported: further down, a process with no console and no -Quiet
+        // calls AllocConsole() so an interactive user can see the menu. watch-loop passed
+        // no -Quiet, so the watcher -- a background process running for hours -- allocated
+        // itself a visible console window. Measured before the fix: the resident
+        // dsh-guardian-console.exe reported MainWindowHandle 6752112.
+        //
+        // Both are forced from the verb rather than left to the caller's arguments: the
+        // GUI could pass -Quiet, but then any other way of starting the watcher would
+        // bring the window back.
+        bool isWatcher = verb == "watch-loop";
+        NoDialogs = isWatcher;
+        if (isWatcher) { Quiet = true; }
 
         // -Quiet is passed by the GUI shell when it runs the version picker here:
         // this process manipulates state and shows its own dialogs, and must not
         // leave a console window sitting behind the GUI window.
-        Quiet = args != null && Array.Exists(args, delegate(string a)
+        //
+        // OR-ed, not assigned: as a plain assignment this line would overwrite the
+        // watcher's forced Quiet above -- watch-loop passes no -Quiet, so the flag would
+        // come back false and AllocConsole() would run a few lines later, putting the
+        // window back. The order of these two statements is the whole fix.
+        Quiet = Quiet || (args != null && Array.Exists(args, delegate(string a)
         {
             return a != null && a.TrimStart('-', '/').Equals("quiet", StringComparison.OrdinalIgnoreCase);
-        });
+        }));
 
         // Interactive use (a double-click, where no console exists because this
         // is a winexe) gets one allocated so the user can actually see the menu.

@@ -805,7 +805,10 @@ namespace GuardianGui
                 {
                     outcome = "threw " + ex.GetType().Name + ": " + ex.Message;
                     Text = T("DSH Guardian") + "  " + T("\u51FA\u9519");
-                    try { statusLine.Text = T("\u51FA\u9519\uFF1A") + ex.Message; statusLine.ForeColor = Theme.Danger; } catch { }
+                    // The status line reports one thing only: whether anything is watching.
+                    // An error goes to the result area (and to the crash log); putting it
+                    // on the status line meant the answer to "is it watching?" was hidden
+                    // by whatever the last failed action had to say.
                     try { Append(T("\u51FA\u9519\uFF1A") + ex.Message); } catch { }
                     Program.CrashLog("button " + text, ex);
                 }
@@ -1238,44 +1241,18 @@ namespace GuardianGui
             }
             else
             {
-                // Armed but no live watcher pid. Three different situations used to look
-                // identical here -- "监视器启动中…" -- and one of them never resolves:
+                // Three states, and only three: 未监视 / 启动中 / 监视中.
                 //
-                //   * the watcher is genuinely still starting (powershell cold start)
-                //   * it started, wrote runtime.pid, then died  -> the pid file is stale
-                //   * it never started at all
-                //
-                // Waiting for a watcher that is already dead is the worst version of this
-                // tool being wrong: the window says it is starting, so the user leaves to
-                // install a plugin believing something is watching. So the state is
-                // resolved instead of being reported as forever-starting.
-                bool stalePid = File.Exists(Path.Combine(DataDir, "runtime.pid"));
-                if (stalePid)
-                {
-                    statusLine.Text = T("\u26A0 \u76D1\u89C6\u5668\u5DF2\u9000\u51FA\uFF0C\u76D1\u89C6\u6CA1\u5728\u8DD1");
-                    statusLine.ForeColor = Theme.Danger;
-                }
-                else if (armedNoPidSince != DateTime.MinValue
-                    && (DateTime.Now - armedNoPidSince).TotalSeconds > WatcherStartGraceSeconds)
-                {
-                    statusLine.Text = T("\u26A0 \u76D1\u89C6\u5668\u6CA1\u80FD\u542F\u52A8");
-                    statusLine.ForeColor = Theme.Danger;
-                }
-                else
-                {
-                    // Start the clock the first time this state is seen, so a slow start
-                    // is tolerated and a dead one is reported as soon as the measurement
-                    // says it cannot still be starting.
-                    if (armedNoPidSince == DateTime.MinValue)
-                    {
-                        armedNoPidSince = DateTime.Now;
-                        ClickLog("watcher: armed, waiting for runtime.pid");
-                    }
-                    int waited = (int)(DateTime.Now - armedNoPidSince).TotalSeconds;
-                    statusLine.Text = T("\u25D0 \u6B63\u5728\u542F\u52A8\u76D1\u89C6\u5668\u2026 ")
-                        + waited + T(" \u79D2");
-                    statusLine.ForeColor = Theme.Warn;
-                }
+                // This line carried five at one point -- two of them warnings about a
+                // watcher that had died or never started. The reasoning was sound (a
+                // window that says 启动中 forever hides a dead guard) but the result was a
+                // status line that changed shape depending on which failure it was
+                // describing, so the answer to "is anything watching?" took reading
+                // instead of glancing. The failure cases are not gone: they are in the
+                // log, where a diagnosis belongs, and the process id stays on the line so
+                // the state can be checked against Task Manager.
+                statusLine.Text = T("\u25D0 \u542F\u52A8\u4E2D\u2026");
+                statusLine.ForeColor = Theme.Warn;
             }
 
             // Poll fast whenever the answer can still change, slowly when it cannot.
@@ -1745,8 +1722,11 @@ namespace GuardianGui
             busy = true;
             actions.Enabled = false;
             Cursor = Cursors.WaitCursor;
-            statusLine.Text = T("\u23F3 \u6B63\u5728\u6267\u884C\uFF1A") + what + T(" \u2026");
-            statusLine.ForeColor = Theme.Warn;
+            // The status line is NOT touched here: it reports whether anything is
+            // watching, and that does not change because a button was pressed. The busy
+            // feedback lives in the title bar and the result area, which is enough to
+            // answer "did my click register" without overwriting the one line the user
+            // checks before walking away.
             Text = T("DSH Guardian") + "  " + T("\u6267\u884C\u4E2D\uFF1A") + what;
             Append(T("\u25B6 \u5F00\u59CB\uFF1A") + what);
             ScrollOutputToEnd();
