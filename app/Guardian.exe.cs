@@ -2132,6 +2132,26 @@ internal static class Guardian
                 }
             }
             catch { }
+
+            // Put the mode back to paused on the way out.
+            //
+            // Without this the window is left reading "armed" with no process behind it,
+            // which is exactly the state that shows 检测中 forever: the mode file says
+            // watching, runtime.pid is gone, and nothing will ever change either one.
+            // Reported as "不要一直卡在这". Removing the pid file is not enough -- the
+            // mode file is the other half of the claim, and the loop is the only thing
+            // that knows the claim has ended.
+            //
+            // It matters most for the launcher-closed exit: the window is already gone,
+            // so the next launch is the one that would otherwise come up claiming to be
+            // watching when nothing is.
+            try
+            {
+                File.WriteAllText(Path.Combine(DataDir, "mode.json"),
+                    "{\"mode\":\"paused\"}", new UTF8Encoding(false));
+                WatchLog("resident: mode set back to paused (nothing is watching now)");
+            }
+            catch { }
         }
 
         if (exitReason != null) { WatchLog("resident: exiting (" + exitReason + ")"); }

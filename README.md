@@ -54,7 +54,7 @@ Eight of them, in one row. The interface is Chinese; this is what each one means
 | 退出 | exit (it warns you first if watching is still on) |
 
 The status line is the one to read: `○ 未监视` not watching · `● 监视中` watching ·
-`◐ 启动中…` armed, the watcher has not reported in yet.
+`◐ 检测中…` armed, the watcher has not reported in yet.
 
 ## The window is the switch (by default — changeable)
 

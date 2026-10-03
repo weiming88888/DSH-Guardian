@@ -1251,7 +1251,7 @@ namespace GuardianGui
                 // instead of glancing. The failure cases are not gone: they are in the
                 // log, where a diagnosis belongs, and the process id stays on the line so
                 // the state can be checked against Task Manager.
-                statusLine.Text = T("\u25D0 \u542F\u52A8\u4E2D\u2026");
+                statusLine.Text = T("\u25D0 \u68C0\u6D4B\u4E2D\u2026");
                 statusLine.ForeColor = Theme.Warn;
             }
 
@@ -1773,7 +1773,7 @@ namespace GuardianGui
                 return;
             }
 
-            string who = pid > 0 ? (T("\uFF08\u8FDB\u7A0B ") + pid + T("\uFF09")) : T("\uFF08\u542F\u52A8\u4E2D\uFF09");
+            string who = pid > 0 ? (T("\uFF08\u8FDB\u7A0B ") + pid + T("\uFF09")) : T("\uFF08\u68C0\u6D4B\u4E2D\uFF09");
             // This dialog used to offer "keep watching, just close this window" -- which
             // the implementation cannot honour. The watcher is started with
             // -ParentPid <this process>, and dsh-watchdog.ps1 exits as soon as that pid is
