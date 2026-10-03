@@ -14,12 +14,23 @@
 // Windows PowerShell 5.1 and csc read this file comfortably, and the project
 // already relies on that rule everywhere else.
 
+
 using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Text;
 using System.Windows.Forms;
+
+// The GUI carried no version resource at all: Properties on dsh-guardian.exe showed
+// 0.0.0.0 while the console build showed the real number, so the one file users actually
+// double-click was the one that could not answer "which version is this". Kept in step
+// with Guardian.exe.cs by hand -- two files, one number, and a mismatch here is how a
+// bug report ends up describing a build nobody can identify.
+[assembly: System.Reflection.AssemblyVersion("1.2.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.2.0.0")]
+[assembly: System.Reflection.AssemblyProduct("DSH Guardian")]
+[assembly: System.Reflection.AssemblyTitle("DSH Guardian")]
 
 namespace GuardianGui
 {
