@@ -366,6 +366,11 @@ namespace GuardianGui
         // cold PowerShell start. Five seconds is several times that, and still short
         // enough that nobody stands in front of the window wondering.
         internal const int WatcherStartGraceSeconds = 5;
+        // Waiting for the watcher to claim data\runtime.pid after it is launched.
+        // 20 x 300ms = 6s, deliberately a little longer than the 5s status grace so the
+        // arming action finishes before the status line declares a failure.
+        internal const int WatcherPidWaitTries = 20;
+        internal const int WatcherPidWaitMs = 300;
         internal const int StatusRowPx = 48;
         internal const int DetailRowPx = 72;
         internal const int ActionRowPx = 52;
@@ -1476,9 +1481,12 @@ namespace GuardianGui
                 Process.Start(psi);
 
                 int pid = 0;
-                for (int i = 0; i < 20 && pid == 0; i++)
+                // How long to wait for the watcher to claim its pid file, and how often
+                // to look. Measured: one to two seconds. Named rather than inlined so the
+                // wait and the poll are the same numbers the constants describe.
+                for (int i = 0; i < WatcherPidWaitTries && pid == 0; i++)
                 {
-                    System.Threading.Thread.Sleep(300);
+                    System.Threading.Thread.Sleep(WatcherPidWaitMs);
                     pid = WatcherPid;
                 }
                 if (pid > 0)
