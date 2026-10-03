@@ -326,6 +326,11 @@ namespace GuardianGui
         //                       not -- the second line was drawn into the button row.
         internal const int StatusRefreshMs = 2000;
         internal const int StartupTestDelayMs = 1200;
+        // How long "armed but no watcher yet" may last before the window calls it a
+        // failure. A PowerShell cold start plus the watcher claiming its pid file takes
+        // one to three seconds; 15 leaves room for a loaded machine without leaving the
+        // user staring at "启动中…" for a watcher that is never coming.
+        internal const int WatcherStartGraceSeconds = 15;
         internal const int StatusRowPx = 48;
         internal const int DetailRowPx = 72;
         internal const int ActionRowPx = 52;
@@ -347,6 +352,10 @@ namespace GuardianGui
         // ---- controls --------------------------------------------------------
         private Label detailLine;
         private CheckBox keepBox;
+        // When "armed but no live watcher pid" was first seen, so the window can tell
+        // "still starting" apart from "never started". Reset whenever the state resolves.
+        private DateTime armedNoPidSince = DateTime.MinValue;
+        private string lastStatusLogged = null;
         private Label statusLine;
         private FlowLayoutPanel actions;
         private GroupBox statusZone;
@@ -1172,16 +1181,65 @@ namespace GuardianGui
             }
             else
             {
-                statusLine.Text = T("\u25D0 \u5DF2\u5F00\u542F\uFF0C\u76D1\u89C6\u5668\u542F\u52A8\u4E2D\u2026");
-                statusLine.ForeColor = Theme.Warn;
+                // Armed but no live watcher pid. Three different situations used to look
+                // identical here -- "监视器启动中…" -- and one of them never resolves:
+                //
+                //   * the watcher is genuinely still starting (powershell cold start)
+                //   * it started, wrote runtime.pid, then died  -> the pid file is stale
+                //   * it never started at all
+                //
+                // Waiting for a watcher that is already dead is the worst version of this
+                // tool being wrong: the window says it is starting, so the user leaves to
+                // install a plugin believing something is watching. So the state is
+                // resolved instead of being reported as forever-starting.
+                bool stalePid = File.Exists(Path.Combine(DataDir, "runtime.pid"));
+                if (stalePid)
+                {
+                    statusLine.Text = T("\u26A0 \u76D1\u89C6\u5668\u5DF2\u9000\u51FA\uFF0C\u76D1\u89C6\u6CA1\u5728\u8DD1");
+                    statusLine.ForeColor = Theme.Danger;
+                }
+                else if (armedNoPidSince != DateTime.MinValue
+                    && (DateTime.Now - armedNoPidSince).TotalSeconds > WatcherStartGraceSeconds)
+                {
+                    statusLine.Text = T("\u26A0 \u76D1\u89C6\u5668\u6CA1\u80FD\u542F\u52A8");
+                    statusLine.ForeColor = Theme.Danger;
+                }
+                else
+                {
+                    // Start the clock the first time this state is seen, so a slow start
+                    // is tolerated and a dead one is eventually reported.
+                    if (armedNoPidSince == DateTime.MinValue) { armedNoPidSince = DateTime.Now; }
+                    statusLine.Text = T("\u25D0 \u5DF2\u5F00\u542F\uFF0C\u76D1\u89C6\u5668\u542F\u52A8\u4E2D\u2026");
+                    statusLine.ForeColor = Theme.Warn;
+                }
             }
+
+            // Record the status line whenever it changes.
+            //
+            // The window's whole promise is "this line tells you whether anything is
+            // watching", and there was no way to check what it said without looking at
+            // the screen -- a screenshot and an OCR pass, which is how the stuck
+            // "启动中…" was reported. One line per change is cheap and makes the claim
+            // checkable from data/gui-clicks.log.
+            try
+            {
+                string shown = statusLine.Text;
+                if (shown != lastStatusLogged)
+                {
+                    lastStatusLogged = shown;
+                    ClickLog("status: " + shown);
+                }
+            }
+            catch { }
 
             if (!armed)
             {
                 statusLine.Text += T("   \u2014\u2014 \u4E0D\u5360\u7528\u4EFB\u4F55\u8D44\u6E90");
+                armedNoPidSince = DateTime.MinValue;
             }
             else if (pid > 0)
             {
+                armedNoPidSince = DateTime.MinValue;
                 // The suffix states the behaviour that is actually in force, which now
                 // depends on the setting rather than being fixed.
                 // Read the RUNNING watcher's binding, not the setting: they diverge as
