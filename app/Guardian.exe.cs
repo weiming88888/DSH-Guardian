@@ -812,7 +812,7 @@ internal static class Guardian
         {
             // Order matters when disarming: flag first so the watcher stops at
             // its next poll, then make sure it is really gone.
-            Exec(WatchdogPath, "-Pause", true);
+            Exec(WatchdogPath, "-Pause");
             StopWatcher();
             Console.WriteLine("自动检查：已关闭 —— 监视器已停止，不再占用任何资源");
             return 0;
@@ -824,7 +824,7 @@ internal static class Guardian
         int pid = StartWatcher("auto");
         if (pid <= 0)
         {
-            Exec(WatchdogPath, "-Pause", true);
+            Exec(WatchdogPath, "-Pause");
             Console.WriteLine("自动检查：启动失败，已保持关闭。");
             Console.WriteLine("  监视器没能启动，请检查这两个文件：");
             Console.WriteLine("    " + WatchdogPath);
@@ -1644,7 +1644,7 @@ internal static class Guardian
                 try { Console.ReadKey(true); } catch { }
                 return -1;   // -1 = "not really exiting"
             }
-            Exec(WatchdogPath, "-Pause", true);
+            Exec(WatchdogPath, "-Pause");
             StopWatcher();
         }
         return 0;
@@ -1840,7 +1840,7 @@ internal static class Guardian
         if (rc == 0 && !wasActive)
         {
             // Keep the automatic path consistent with this manual choice.
-            Exec(SnapshotPath, "-Action Promote -Snapshot \"" + name + "\"", true);
+            Exec(SnapshotPath, "-Action Promote -Snapshot \"" + name + "\"");
             Console.WriteLine();
             Console.WriteLine("回退目标已同步为这一份，之后崩溃会自动退到这里。");
         }
@@ -1962,11 +1962,6 @@ internal static class Guardian
     }
 
     // -------------------------------------------------------------- process
-    private static int Exec(string script, string scriptArgs)
-    {
-        return Exec(script, scriptArgs, false);
-    }
-
     // ---------------------------------------------------------------- watch-loop
     //
     // The resident watcher used to BE a long-lived PowerShell process: ~139 MB held for
@@ -2291,13 +2286,12 @@ internal static class Guardian
         return fallback;
     }
 
-    // quietChild: hide the child console entirely (used by the resident watcher).
     //
     // Child stderr is captured to data\child-stderr.log as well as shown. The
     // snapshot script can fail with a PowerShell error that closes the child
     // before anything reaches the console; without a copy on disk there is
     // nothing left to diagnose.
-    private static int Exec(string script, string scriptArgs, bool quietChild)
+    private static int Exec(string script, string scriptArgs)
     {
         try
         {
